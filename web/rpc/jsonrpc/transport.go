@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"time"
 
@@ -114,14 +113,20 @@ func serveWebSocket(c *gin.Context) {
 			continue
 		}
 		// 同步写：SafeConn 内部有锁，串行写避免响应乱序与并发竞态。
+		meta.TempShareValid = hasTempShareAccess(c)
 		conn.WriteJSON(dispatchWithSensitive(context.Background(), c, meta, &req))
 	}
 }
 
 func servePost(c *gin.Context) {
-	body, err := io.ReadAll(c.Request.Body)
+	body, err := api.ReadLimitedBody(c.Request.Body)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, rpc.ErrorResponse(nil, rpc.ParseError, "read body error", err.Error()))
+		status := http.StatusBadRequest
+		var limitErr *http.MaxBytesError
+		if errors.As(err, &limitErr) {
+			status = http.StatusRequestEntityTooLarge
+		}
+		c.JSON(status, rpc.ErrorResponse(nil, rpc.ParseError, "read body error", err.Error()))
 		return
 	}
 	requests, jerr := rpc.ParseRequests(body)
@@ -130,6 +135,10 @@ func servePost(c *gin.Context) {
 		return
 	}
 	meta := buildContextMeta(c)
+	if len(requests) > 100 {
+		c.JSON(http.StatusBadRequest, rpc.ErrorResponse(nil, rpc.InvalidRequest, "batch limit is 100 requests", nil))
+		return
+	}
 
 	responses := make([]*rpc.JsonRpcResponse, 0, len(requests))
 	for _, rreq := range requests {

@@ -1,6 +1,7 @@
 package accounts
 
 import (
+	"errors"
 	"image"
 
 	"github.com/komari-monitor/komari/database/dbcore"
@@ -29,7 +30,14 @@ func Generate2Fa() (string, image.Image, error) {
 
 func Enable2Fa(uuid, secret string) error {
 	db := dbcore.GetDBInstance()
-	return db.Model(&models.User{}).Where("uuid = ?", uuid).Update("two_factor", secret).Error
+	result := db.Model(&models.User{}).Where("uuid = ? AND (two_factor = '' OR two_factor IS NULL)", uuid).Update("two_factor", secret)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return errors.New("second factor already enrolled or account missing")
+	}
+	return nil
 }
 
 func Verify2Fa(uuid, code string) (bool, error) {

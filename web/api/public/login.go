@@ -2,12 +2,14 @@ package public
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/komari-monitor/komari/database/accounts"
 	"github.com/komari-monitor/komari/database/auditlog"
 	"github.com/komari-monitor/komari/internal/config"
 	"github.com/komari-monitor/komari/utils"
 	"github.com/komari-monitor/komari/web/api"
+	"github.com/komari-monitor/komari/web/security"
 
 	"github.com/gin-gonic/gin"
 )
@@ -19,6 +21,9 @@ type LoginRequest struct {
 }
 
 const sessionCookieMaxAge = 2592000
+
+var loginLimiter security.LoginLimiter
+var passwordSlots = make(chan struct{}, 4)
 
 func setSessionCookie(c *gin.Context, value string, maxAge int) {
 	http.SetCookie(c.Writer, &http.Cookie{
@@ -33,6 +38,20 @@ func setSessionCookie(c *gin.Context, value string, maxAge int) {
 }
 
 func Login(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 64<<10)
+	if !loginLimiter.Allow(c.ClientIP(), time.Now()) {
+		c.Header("Retry-After", "60")
+		api.RespondError(c, http.StatusTooManyRequests, "Too many login attempts; retry later")
+		return
+	}
+	select {
+	case passwordSlots <- struct{}{}:
+		defer func() { <-passwordSlots }()
+	default:
+		c.Header("Retry-After", "5")
+		api.RespondError(c, http.StatusTooManyRequests, "Login service busy; retry later")
+		return
+	}
 	DisablePasswordLogin, _ := config.GetAs[bool](config.DisablePasswordLoginKey, false)
 	if DisablePasswordLogin {
 		api.RespondError(c, http.StatusForbidden, "Password login is disabled")

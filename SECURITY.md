@@ -1,0 +1,65 @@
+# May Monitor server security profile
+
+The 2026-10-24 review covers the default monitoring profile at the locally
+reviewed source snapshot. It is not approval to deploy all upstream features.
+The workspace report records exact evidence, upstream commits and limitations.
+
+- Sessions and agent tokens are revalidated on WebSocket messages. Revoked or
+  expired credentials cannot continue sending reports or receiving control data.
+- Agent inventory accepts machine fields only. Visibility, tokens, notes,
+  names, billing and group assignments belong to the administrator.
+- JSON and decompressed WebSocket/body messages are limited to 4 MiB; RPC
+  batches to 100 calls. File streaming uses separate authenticated limits.
+- Passwords use randomly salted bcrypt over SHA-256 prehashed password input,
+  work factor 12. Legacy fixed-salt hashes are upgraded after successful login.
+- Login attempts, concurrent password verification and OAuth state storage are
+  bounded. Forwarded IP headers are untrusted unless the operator configures
+  `MAY_MONITOR_TRUSTED_PROXIES` with actual proxy addresses/CIDRs.
+- First-run writes require `X-May-Setup-Token`, obtained from the private
+  `/install#setup=...` link printed locally at startup. A token may instead be
+  supplied through `MAY_MONITOR_SETUP_TOKEN` (32-256 characters). Keep that
+  console output private. The token is not returned by an API and becomes
+  unusable after the installation controller deactivates. A fresh installation
+  starts in private-site mode with marketplace SSRF protection enabled.
+- The normal data root is private (Unix mode 0700), and a symlink root is
+  rejected. External database paths, service accounts, file ACLs, reverse proxy
+  admission limits and backups still require deployment review.
+
+## Operator-controlled capabilities
+
+The following environment capabilities default to **disabled** and cannot be
+enabled using web settings or an API key:
+
+| Variable | Capability |
+| --- | --- |
+| `MAY_MONITOR_ALLOW_REMOTE_CONTROL` | Agent commands, terminal, file access, startup configuration and version switching |
+| `MAY_MONITOR_ALLOW_DATABASE_CONSOLE` | Arbitrary SQL queries and statements |
+| `MAY_MONITOR_ALLOW_EXTENSIONS` | Plugins, custom themes/raw page HTML and JavaScript notification scripts |
+| `MAY_MONITOR_ALLOW_ARCHIVE_IMPORT` | Archive import; extension permission is also required |
+| `MAY_MONITOR_ALLOW_DEBUG` | Profiling/debug HTTP routes |
+
+Only the exact value `true` opts in. Enabling a capability expands the trusted
+administrator and code execution boundary; it does not inherit approval from
+the monitoring-profile review. API keys remain full administrator credentials,
+not scoped read-only integration tokens. Do not use them for a public client.
+
+The retained JavaScript runtime is not an operating-system security boundary.
+Untrusted plugins and notification scripts must not be loaded. Optional real
+SSO providers, remote control and data migration still need separate acceptance.
+
+## Builds and upstream changes
+
+Use Go 1.27.3 and the reviewed frontend revision/lockfile. The manual security
+workflow accepts a full commit ID from the owned May frontend repository and
+uses pinned official Actions. It does not publish or deploy. Historical upstream
+workflows live under `.github/upstream-workflows/` with disabled extensions.
+`install-komari.sh.upstream-disabled` is reference material, not an installer.
+Do not restore upstream auto-follow or release automation without reviewing it.
+
+The known OpenPGP warning in `golang.org/x/crypto` has no fixed upstream version;
+the server does not import those packages. Keep the warning visible and verify
+the import graph again after every dependency or source change.
+
+## First May prerelease
+
+`v0.1.0-rc.1` packages this reviewed monitoring profile. See the [shared security review](https://github.com/mxh110708/may-monitor-server/blob/v0.1.0-rc.1/docs/SECURITY-REVIEW-2026-10-24.zh-CN.md). Release manifests pin all three source commits. No automatic installation or production migration is authorized.

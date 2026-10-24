@@ -2,13 +2,16 @@ package accounts
 
 import (
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/komari-monitor/komari/database/dbcore"
 	"github.com/komari-monitor/komari/database/models"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
@@ -22,8 +25,24 @@ func CheckPassword(username, passwd string) (uuid string, ok bool) {
 	if result.Error != nil {
 		return "", false
 	}
-	if hashPasswd(passwd) != user.Passwd {
-		return "", false
+	if strings.HasPrefix(user.Passwd, passwordHashPrefix) {
+		if bcrypt.CompareHashAndPassword([]byte(strings.TrimPrefix(user.Passwd, passwordHashPrefix)), passwordInput(passwd)) != nil {
+			return "", false
+		}
+	} else {
+		// Upgrade old accounts only after a successful constant-time verification.
+		legacy := sha256.Sum256([]byte(passwd + constantSalt))
+		if subtle.ConstantTimeCompare([]byte(base64.StdEncoding.EncodeToString(legacy[:])), []byte(user.Passwd)) != 1 {
+			return "", false
+		}
+		encoded, err := hashPasswd(passwd)
+		if err != nil {
+			return "", false
+		}
+		updated := db.Model(&models.User{}).Where("uuid = ? AND passwd = ?", user.UUID, user.Passwd).Update("passwd", encoded)
+		if updated.Error != nil || updated.RowsAffected != 1 {
+			return "", false
+		}
 	}
 	return user.UUID, true
 }
@@ -31,7 +50,11 @@ func CheckPassword(username, passwd string) (uuid string, ok bool) {
 // ForceResetPassword 强制重置用户密码
 func ForceResetPassword(username, passwd string) error {
 	db := dbcore.GetDBInstance()
-	result := db.Model(&models.User{}).Where("username = ?", username).Update("passwd", hashPasswd(passwd))
+	encoded, err := hashPasswd(passwd)
+	if err != nil {
+		return err
+	}
+	result := db.Model(&models.User{}).Where("username = ?", username).Update("passwd", encoded)
 	if result.Error != nil {
 		return result.Error
 	}
@@ -41,10 +64,21 @@ func ForceResetPassword(username, passwd string) error {
 	return nil
 }
 
-// hashPasswd 对密码进行加盐哈希
-func hashPasswd(passwd string) string {
-	h := sha256.Sum256([]byte(passwd + constantSalt))
-	return base64.StdEncoding.EncodeToString(h[:])
+const passwordHashPrefix = "$may-bcrypt-sha256$"
+
+// Prehashing avoids bcrypt's 72-byte truncation while retaining a random salt
+// and an adaptive work factor. The fixed-salt SHA256 format is read-only legacy.
+func passwordInput(passwd string) []byte {
+	h := sha256.Sum256([]byte(passwd))
+	return []byte(base64.StdEncoding.EncodeToString(h[:]))
+}
+
+func hashPasswd(passwd string) (string, error) {
+	h, err := bcrypt.GenerateFromPassword(passwordInput(passwd), 12)
+	if err != nil {
+		return "", err
+	}
+	return passwordHashPrefix + string(h), nil
 }
 
 func CreateAccount(username, passwd string) (user models.User, err error) {
@@ -52,10 +86,14 @@ func CreateAccount(username, passwd string) (user models.User, err error) {
 }
 
 func CreateAccountWithDB(db *gorm.DB, username, passwd string) (models.User, error) {
+	encoded, err := hashPasswd(passwd)
+	if err != nil {
+		return models.User{}, err
+	}
 	user := models.User{
 		UUID:     uuid.New().String(),
 		Username: username,
-		Passwd:   hashPasswd(passwd),
+		Passwd:   encoded,
 	}
 	return user, db.Create(&user).Error
 }
@@ -106,7 +144,11 @@ func UpdateUser(uuid string, name, password, sso_type *string) error {
 		updates["username"] = *name
 	}
 	if password != nil {
-		updates["passwd"] = hashPasswd(*password)
+		encoded, err := hashPasswd(*password)
+		if err != nil {
+			return err
+		}
+		updates["passwd"] = encoded
 	}
 	if sso_type != nil {
 		updates["sso_type"] = *sso_type

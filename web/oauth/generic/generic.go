@@ -3,6 +3,7 @@ package generic
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -33,7 +34,9 @@ func (g *Generic) GetAuthorizationURL(redirectURI string) (string, string) {
 		url.QueryEscape(g.Addition.Scope),
 		url.QueryEscape(redirectURI),
 	)
-	g.stateCache.Set(state, true, cache.DefaultExpiration)
+	if !factory.StoreState(g.stateCache, state) {
+		return "", ""
+	}
 	return authURL, state
 }
 func (g *Generic) OnCallback(ctx *gin.Context, state string, query map[string]string, callbackURI string) (factory.OidcCallback, error) {
@@ -43,7 +46,7 @@ func (g *Generic) OnCallback(ctx *gin.Context, state string, query map[string]st
 	if g.stateCache == nil {
 		return factory.OidcCallback{}, fmt.Errorf("state cache not initialized")
 	}
-	if _, ok := g.stateCache.Get(state); !ok {
+	if !factory.ConsumeState(g.stateCache, state) {
 		return factory.OidcCallback{}, fmt.Errorf("invalid state")
 	}
 
@@ -64,7 +67,7 @@ func (g *Generic) OnCallback(ctx *gin.Context, state string, query map[string]st
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
 	if err != nil {
 		return factory.OidcCallback{}, fmt.Errorf("failed to get access token: %s", utils.DataMasking(err.Error(), []string{g.Addition.ClientSecret, g.Addition.ClientId}))
 	}
@@ -74,8 +77,14 @@ func (g *Generic) OnCallback(ctx *gin.Context, state string, query map[string]st
 		AccessToken string `json:"access_token"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+	if resp.StatusCode != http.StatusOK {
+		return factory.OidcCallback{}, fmt.Errorf("token endpoint rejected request")
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&tokenResp); err != nil {
 		return factory.OidcCallback{}, fmt.Errorf("failed to parse access token response: %s", utils.DataMasking(err.Error(), []string{g.Addition.ClientSecret, g.Addition.ClientId}))
+	}
+	if tokenResp.AccessToken == "" {
+		return factory.OidcCallback{}, fmt.Errorf("missing OAuth access token")
 	}
 
 	// 获取用户信息
@@ -83,19 +92,22 @@ func (g *Generic) OnCallback(ctx *gin.Context, state string, query map[string]st
 	userReq.Header.Set("Authorization", "Bearer "+tokenResp.AccessToken)
 	userReq.Header.Set("Accept", "application/json")
 
-	userResp, err := http.DefaultClient.Do(userReq)
+	userResp, err := (&http.Client{Timeout: 20 * time.Second}).Do(userReq)
 	if err != nil {
 		return factory.OidcCallback{}, fmt.Errorf("failed to get user info: %v", err)
 	}
 	defer userResp.Body.Close()
 
 	var user map[string]interface{}
-	if err := json.NewDecoder(userResp.Body).Decode(&user); err != nil {
+	if userResp.StatusCode != http.StatusOK {
+		return factory.OidcCallback{}, fmt.Errorf("user endpoint rejected request")
+	}
+	if err := json.NewDecoder(io.LimitReader(userResp.Body, 1<<20)).Decode(&user); err != nil {
 		return factory.OidcCallback{}, fmt.Errorf("failed to parse user info response: %v", err)
 	}
 
 	userId, ok := user[g.Addition.UserIDField]
-	if !ok {
+	if !ok || userId == nil || fmt.Sprintf("%v", userId) == "" {
 		return factory.OidcCallback{}, fmt.Errorf("user id field '%s' not found in user info response", g.Addition.UserIDField)
 	}
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"sync"
 	"time"
 
@@ -55,6 +56,9 @@ var errTooManyDroppedFrames = errors.New("too many frames dropped by plugin hook
 // maxConsecutiveDroppedFrames bounds the internal re-read loop.
 const maxConsecutiveDroppedFrames = 16
 
+// Limit both wire frames and decompressed application data.
+const MaxMessageBytes int64 = 4 << 20
+
 // SafeConn wraps a websocket connection with a mutex so concurrent writes
 // cannot interleave frames, and funnels every frame through the optional
 // plugin interceptor when one is attached.
@@ -65,14 +69,26 @@ type SafeConn struct {
 
 	interceptor FrameInterceptor
 	info        *ConnInfo
+	authorized  func() bool
 }
 
 func NewSafeConn(conn *websocket.Conn) *SafeConn {
+	conn.SetReadLimit(MaxMessageBytes)
 	return &SafeConn{
 		conn: conn,
 		mu:   sync.Mutex{},
 		ID:   time.Now().UnixNano(),
 	}
+}
+
+func (sc *SafeConn) SetAuthorization(check func() bool) { sc.authorized = check }
+
+func (sc *SafeConn) checkAuthorization() error {
+	if sc.authorized != nil && !sc.authorized() {
+		_ = sc.conn.Close()
+		return errors.New("connection credentials expired or revoked")
+	}
+	return nil
 }
 
 // SetInterceptor attaches the hook provider and the connection identity. It
@@ -89,8 +105,22 @@ func (sc *SafeConn) SetInterceptor(info *ConnInfo, interceptor FrameInterceptor)
 // processed frames.
 func (sc *SafeConn) readFrame() (int, []byte, error) {
 	for dropped := 0; ; {
-		messageType, data, err := sc.conn.ReadMessage()
+		if err := sc.checkAuthorization(); err != nil {
+			return 0, nil, err
+		}
+		messageType, reader, err := sc.conn.NextReader()
 		if err != nil {
+			return 0, nil, err
+		}
+		data, err := io.ReadAll(io.LimitReader(reader, MaxMessageBytes+1))
+		if err != nil {
+			return 0, nil, err
+		}
+		if int64(len(data)) > MaxMessageBytes {
+			_ = sc.conn.Close()
+			return 0, nil, errors.New("WebSocket message too large")
+		}
+		if err := sc.checkAuthorization(); err != nil {
 			return 0, nil, err
 		}
 		sc.mu.Lock()
@@ -112,8 +142,12 @@ func (sc *SafeConn) readFrame() (int, []byte, error) {
 // writeFrame runs the wsSend hook chain then writes one frame. A dropped
 // frame is silently skipped; a nil interceptor writes through immediately.
 func (sc *SafeConn) writeFrame(messageType int, data []byte) error {
+	if err := sc.checkAuthorization(); err != nil {
+		return err
+	}
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
+	_ = sc.conn.SetWriteDeadline(time.Now().Add(15 * time.Second))
 	if sc.interceptor == nil || sc.info == nil {
 		return sc.conn.WriteMessage(messageType, data)
 	}

@@ -1,3 +1,5 @@
+> **May fork v0.1.0-rc.1:** Initial prerelease of the reviewed default monitoring profile. Read [SECURITY.md](SECURITY.md) first. Upstream installation/publishing instructions below are historical references, not approved May deployment steps.
+
 # Komari
 
 ![Badge](https://hitscounter.dev/api/hit?url=https%3A%2F%2Fgithub.com%2Fkomari-monitor%2Fkomari&label=&icon=github&color=%23a370f7&message=&style=flat&tz=UTC)

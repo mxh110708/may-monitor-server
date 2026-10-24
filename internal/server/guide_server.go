@@ -41,6 +41,9 @@ func (a *App) runGuideServer(controller guideController, cfg guideServerConfig) 
 	defer controller.Deactivate()
 
 	r := gin.New()
+	if err := security.ConfigureTrustedProxies(r); err != nil {
+		return false, err
+	}
 	r.Use(logger.GinLogger(), logger.GinRecovery(), noStoreAPIResponses())
 	if cfg.requireIdentity {
 		cors := security.NewCorsController(a.settings.CorsOriginCheckEnabled, a.settings.CorsAllowedOrigins)
@@ -56,7 +59,7 @@ func (a *App) runGuideServer(controller guideController, cfg guideServerConfig) 
 		r.NoRoute(guideNoRoute(cfg.pagePath, cfg.missingAPI, handlers))
 	})
 
-	server := &http.Server{Addr: a.listenAddr, Handler: r}
+	server := security.NewHTTPServer(a.listenAddr, r)
 	a.engine = r
 	a.server = server
 	serverErr := make(chan error, 1)

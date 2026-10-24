@@ -725,6 +725,9 @@ func fsMode(vm *moejs.Runtime, value moejs.Value, fallback os.FileMode) os.FileM
 		if err == nil {
 			return os.FileMode(mode)
 		}
+		// writeFile(path, data, "utf8") supplies an encoding, not a file
+		// mode. Coercing it to a number created mode-000 files on Unix.
+		return fallback
 	}
 	return os.FileMode(native.Int(vm, value))
 }

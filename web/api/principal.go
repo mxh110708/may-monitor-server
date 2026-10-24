@@ -9,7 +9,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/komari-monitor/komari/database/accounts"
 	"github.com/komari-monitor/komari/database/clients"
+	"github.com/komari-monitor/komari/internal/config"
 	"github.com/komari-monitor/komari/pkg/rpc"
+	"time"
 )
 
 // principalContextKey 是 principal 在 gin.Context 中的存储键。
@@ -26,7 +28,9 @@ func IdentifyPrincipal(c *gin.Context) *rpc.Principal {
 	// 2. Session(管理员用户)
 	if session, err := c.Cookie("session_token"); err == nil && session != "" {
 		if uuid, err := accounts.GetSession(session); err == nil && uuid != "" {
-			return rpc.NewUserPrincipal(uuid)
+			if _, err := accounts.GetUserByUUID(uuid); err == nil {
+				return rpc.NewUserPrincipal(uuid)
+			}
 		}
 	}
 
@@ -39,6 +43,48 @@ func IdentifyPrincipal(c *gin.Context) *rpc.Principal {
 
 	// 4. 匿名访客
 	return rpc.NewAnonymousPrincipal()
+}
+
+// Capture immutable handshake credentials, never the cached handshake role.
+// Revalidate on each incoming/outgoing frame, including queued control events.
+func principalValidator(c *gin.Context) func() bool {
+	p := GetPrincipal(c)
+	if p == nil {
+		p = IdentifyPrincipal(c)
+	}
+	switch p.Type {
+	case rpc.PrincipalUser:
+		session, _ := c.Cookie("session_token")
+		return func() bool {
+			id, err := accounts.GetSession(session)
+			if err != nil || id != p.UserUUID {
+				return false
+			}
+			_, err = accounts.GetUserByUUID(id)
+			return err == nil
+		}
+	case rpc.PrincipalAPIKey:
+		auth := c.GetHeader("Authorization")
+		return func() bool { return isApiKeyValid(auth) }
+	case rpc.PrincipalAgent:
+		token := extractClientToken(c)
+		return func() bool { id, err := clients.GetClientUUIDByToken(token); return err == nil && id == p.ClientUUID }
+	}
+	// RPC checks its public login whitelist/share on each call. Other public
+	// streams must also stop disclosing data if private mode/share state changes.
+	if c.Request.URL.Path != "/api/rpc2" {
+		key, _ := c.Cookie("temp_key")
+		return func() bool {
+			private, _ := config.GetAs[bool](config.PrivateSiteKey, false)
+			if !private {
+				return true
+			}
+			allowed, _ := config.GetAs[string]("tempory_share_token", "")
+			expires, _ := config.GetAs[int64]("tempory_share_token_expire_at", 0)
+			return key != "" && key == allowed && expires >= time.Now().Unix()
+		}
+	}
+	return nil
 }
 
 // SetPrincipal 将已识别的主体写入 gin.Context,供下游(RPC 边界等)复用。

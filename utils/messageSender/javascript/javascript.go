@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/komari-monitor/komari/internal/securitypolicy"
 	"github.com/komari-monitor/komari/pkg/jsruntime"
 	"github.com/komari-monitor/komari/utils/messageSender"
 	"github.com/komari-monitor/komari/utils/messageSender/outboundhttp"
@@ -30,6 +31,9 @@ type JavaScriptSender struct {
 }
 
 func (j *JavaScriptSender) Send(ctx context.Context, notification messageSender.Notification, config map[string]any) error {
+	if !securitypolicy.Enabled("EXTENSIONS") {
+		return errors.New("JavaScript notifications disabled by May Monitor operator policy")
+	}
 	var addition Addition
 	if err := messageSender.DecodeConfiguration(config, &addition); err != nil {
 		return err

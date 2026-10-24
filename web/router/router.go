@@ -19,6 +19,7 @@ import (
 // 设计：JSON 类接口统一经声明式路由桥 jsonRpc.Bind 绑定到对应 RPC2 方法，
 // 不再有 per-resource gin handler 层。仅二进制/流/重定向/特殊鉴权类接口保留为 REST handler。
 func Register(r *gin.Engine) {
+	r.Use(api.CapabilityBoundary())
 	r.Any("/ping", func(c *gin.Context) {
 		c.String(200, "pong")
 	})
@@ -39,7 +40,7 @@ func Register(r *gin.Engine) {
 func registerPublicRoutes(r *gin.Engine) {
 	// 非 JSON / 特殊流程，保留 REST handler。
 	r.POST("/api/login", public_api.Login)
-	r.GET("/api/logout", public_api.Logout)
+	r.POST("/api/logout", public_api.Logout)
 	r.GET("/api/oauth", public_api.OAuth)
 	r.GET("/api/oauth_callback", public_api.OAuthCallback)
 	// 插件公开页面（visibility=public 的 iframe 页面），无需鉴权。
@@ -110,7 +111,7 @@ func registerAdminRoutes(r *gin.Engine) {
 	{
 		theme.GET("/list", admin.ListThemes)
 		theme.POST("/delete", admin.DeleteTheme)
-		theme.GET("/set", admin.SetTheme)
+		theme.POST("/set", admin.SetTheme)
 		theme.POST("/update", admin.UpdateTheme)
 		theme.POST("/import", admin.ImportTheme)
 		theme.POST("/settings", admin.UpdateThemeSettings)
@@ -125,7 +126,7 @@ func registerAdminRoutes(r *gin.Engine) {
 	// 2FA 含二维码 PNG / 敏感操作，保留 REST handler。
 	twoFactor := g.Group("/2fa")
 	{
-		twoFactor.GET("/generate", admin.Generate2FA)
+		twoFactor.POST("/generate", admin.Generate2FA)
 		twoFactor.POST("/enable", admin.Enable2FA)
 		twoFactor.POST("/disable", api.RequireSensitive2FA(), admin.Disable2FA)
 	}

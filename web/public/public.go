@@ -2,6 +2,7 @@ package public
 
 import (
 	"embed"
+	"html"
 	"io/fs"
 	"mime"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/komari-monitor/komari/internal/config"
+	"github.com/komari-monitor/komari/internal/securitypolicy"
 )
 
 //go:embed defaultTheme/komari-theme.json
@@ -140,6 +142,11 @@ func static(r *gin.RouterGroup, noRoute func(handlers ...gin.HandlerFunc), force
 			config.SitenameKey:    "Komari Monitor",
 			config.ThemeKey:       DefaultTheme,
 		})
+		if !securitypolicy.Enabled("EXTENSIONS") {
+			cfg[config.CustomHeadKey] = ""
+			cfg[config.CustomBodyKey] = ""
+			cfg[config.ThemeKey] = DefaultTheme
+		}
 		return cfg
 	}
 
@@ -232,8 +239,8 @@ func static(r *gin.RouterGroup, noRoute func(handlers ...gin.HandlerFunc), force
 
 		// 执行 HTML 内容替换
 		replacer := strings.NewReplacer(
-			"<title>Komari Monitor</title>", "<title>"+cfg[config.SitenameKey].(string)+"</title>",
-			"A simple server monitor tool.", cfg[config.DescriptionKey].(string),
+			"<title>Komari Monitor</title>", "<title>"+html.EscapeString(cfg[config.SitenameKey].(string))+"</title>",
+			"A simple server monitor tool.", html.EscapeString(cfg[config.DescriptionKey].(string)),
 			"</head>", cfg[config.CustomHeadKey].(string)+"</head>",
 			"</body>", cfg[config.CustomBodyKey].(string)+"</body>",
 		)

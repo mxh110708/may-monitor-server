@@ -20,10 +20,17 @@ func getClientIPType(ip net.IP) int {
 }
 
 func saveClientBasicInfo(info map[string]interface{}, uuid string, fallbackIP string) error {
-	info["uuid"] = uuid
-	applyFallbackClientIP(info, fallbackIP)
-	appendClientRegionFromGeoIP(info)
-	return clients.SaveClientInfo(info)
+	// Only machine inventory belongs to the reporting agent. Tokens, visibility,
+	// names, billing and notes remain exclusively controller-owned.
+	filtered := map[string]interface{}{"uuid": uuid}
+	for _, key := range []string{"cpu_name", "virtualization", "arch", "cpu_cores", "cpu_physical_cores", "os", "kernel_version", "gpu_name", "ipv4", "ipv6", "mem_total", "swap_total", "disk_total", "version"} {
+		if value, ok := info[key]; ok {
+			filtered[key] = value
+		}
+	}
+	applyFallbackClientIP(filtered, fallbackIP)
+	appendClientRegionFromGeoIP(filtered)
+	return clients.SaveClientInfo(filtered)
 }
 
 func applyFallbackClientIP(info map[string]interface{}, fallbackIP string) {

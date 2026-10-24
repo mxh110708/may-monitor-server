@@ -29,6 +29,7 @@ func init() {
 		Example: map[string]any{"uuid": "agent-uuid", "version": "1.2.*"},
 	})
 	rpc.MarkSensitive("admin:getAgentStartupConfig")
+	rpc.MarkSensitive("admin:switchAgentVersion")
 }
 
 func adminGetAgentStartupConfig(ctx context.Context, req *rpc.JsonRpcRequest) (any, *rpc.JsonRpcError) {

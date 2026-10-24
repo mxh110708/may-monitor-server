@@ -15,6 +15,9 @@ import (
 )
 
 func init() {
+	for _, method := range []string{"fileList", "fileListRoots", "fileStat", "fileMkdir", "fileDelete", "fileMove", "fileCopy", "fileChmod", "fileChown", "fileSearch"} {
+		rpc.MarkSensitive("admin:" + method)
+	}
 	reg("fileList", adminFileList, "List a directory on an agent")
 	reg("fileListRoots", adminFileListRoots, "List filesystem roots exposed by an agent")
 	reg("fileStat", adminFileStat, "Read file metadata from an agent")

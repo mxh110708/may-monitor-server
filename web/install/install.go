@@ -2,9 +2,11 @@ package install
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -18,6 +20,8 @@ import (
 	"github.com/komari-monitor/komari/database/models"
 	appconfig "github.com/komari-monitor/komari/internal/config"
 	"github.com/komari-monitor/komari/internal/metricstore"
+	"github.com/komari-monitor/komari/internal/securitypolicy"
+	"github.com/komari-monitor/komari/utils"
 	logger "github.com/komari-monitor/komari/utils/log"
 	"github.com/komari-monitor/komari/web/api"
 	"github.com/komari-monitor/komari/web/backup"
@@ -44,18 +48,33 @@ type completeRequest struct {
 }
 
 type Controller struct {
-	db     *gorm.DB
-	active atomic.Bool
-	mu     sync.Mutex
-	state  string
-	done   chan struct{}
+	db         *gorm.DB
+	active     atomic.Bool
+	mu         sync.Mutex
+	state      string
+	setupToken string
+	done       chan struct{}
 }
 
 func NewController(db *gorm.DB) *Controller {
-	return &Controller{db: db, state: "ready", done: make(chan struct{})}
+	token := os.Getenv("MAY_MONITOR_SETUP_TOKEN")
+	if token == "" {
+		token = utils.GenerateRandomString(32)
+	}
+	if len(token) < 32 || len(token) > 256 {
+		token = ""
+	}
+	return &Controller{db: db, state: "ready", done: make(chan struct{}), setupToken: token}
 }
 
-func (c *Controller) Activate() { c.active.Store(true) }
+func (c *Controller) Activate() {
+	c.active.Store(true)
+	// The fragment is never sent in HTTP requests/referrers. Mutating API calls
+	// require its value in a header; never expose it from a public endpoint.
+	if c.setupToken != "" {
+		logger.InfoArgs("install", "Private first-run initialization link: /install#setup="+url.QueryEscape(c.setupToken))
+	}
+}
 
 func (c *Controller) Deactivate() { c.active.Store(false) }
 
@@ -81,6 +100,16 @@ func (c *Controller) requireActive(ctx *gin.Context) {
 	if !c.active.Load() {
 		ctx.AbortWithStatus(http.StatusNotFound)
 		return
+	}
+	if ctx.Request.Method != http.MethodGet || ctx.Request.URL.Path != APIPath+"/status" {
+		if c.setupToken == "" || subtle.ConstantTimeCompare([]byte(ctx.GetHeader("X-May-Setup-Token")), []byte(c.setupToken)) != 1 {
+			ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"status": "error", "message": "Use the private initialization link from the server console"})
+			return
+		}
+		if strings.HasPrefix(ctx.Request.URL.Path, APIPath+"/upload/") && (!securitypolicy.Enabled("ARCHIVE_IMPORT") || !securitypolicy.Enabled("EXTENSIONS")) {
+			ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{"status": "error", "message": "archive import disabled by operator policy"})
+			return
+		}
 	}
 	ctx.Next()
 }
@@ -177,10 +206,12 @@ func (c *Controller) createAccountAndSettings(request *completeRequest, cfg *met
 		return err
 	}
 	settings := map[string]any{
-		appconfig.SitenameKey:         request.Sitename,
-		appconfig.DescriptionKey:      request.Description,
-		metricstore.MetricDBDriverKey: cfg.Driver,
-		metricstore.MetricDBDSNKey:    cfg.DSN,
+		appconfig.SitenameKey:              request.Sitename,
+		appconfig.PrivateSiteKey:           true,
+		appconfig.SSRFProtectionEnabledKey: true,
+		appconfig.DescriptionKey:           request.Description,
+		metricstore.MetricDBDriverKey:      cfg.Driver,
+		metricstore.MetricDBDSNKey:         cfg.DSN,
 	}
 	if err := appconfig.SetMany(settings); err != nil {
 		_ = accounts.DeleteAccountByUsernameWithDB(c.db, user.Username)

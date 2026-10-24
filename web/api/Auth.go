@@ -26,7 +26,14 @@ const (
 // api_key/session/client_uuid)以兼容现有 handler 与中间件。
 func IdentityMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !boundRequest(c) {
+			return
+		}
 		p := IdentifyPrincipal(c)
+		if p.Type == rpc.PrincipalUser && !cookieMutationAllowed(c) {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "cross-site mutation rejected"})
+			return
+		}
 		SetPrincipal(c, p)
 
 		// 写入兼容字段。
@@ -162,7 +169,10 @@ func extractClientToken(c *gin.Context) string {
 	}
 
 	if c.Request.Method != http.MethodGet {
-		bodyBytes, err := io.ReadAll(c.Request.Body)
+		if !strings.HasPrefix(strings.ToLower(c.GetHeader("Content-Type")), "application/json") {
+			return ""
+		}
+		bodyBytes, err := ReadLimitedBody(c.Request.Body)
 		if err != nil {
 			return ""
 		}

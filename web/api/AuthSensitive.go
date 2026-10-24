@@ -80,7 +80,7 @@ func get2FACode(c *gin.Context) string {
 	if c.Request.Body == nil || c.Request.Method == http.MethodGet {
 		return ""
 	}
-	bodyBytes, err := io.ReadAll(c.Request.Body)
+	bodyBytes, err := ReadLimitedBody(c.Request.Body)
 	if err != nil {
 		return ""
 	}

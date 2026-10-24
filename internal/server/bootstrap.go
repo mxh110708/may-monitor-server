@@ -13,14 +13,8 @@ import (
 
 // Bootstrap initializes the data directory, primary database, and settings.
 func (a *App) Bootstrap() error {
-	if err := os.MkdirAll("./data/theme", os.ModePerm); err != nil {
-		return fmt.Errorf("failed to create theme directory: %w", err)
-	}
-	if err := os.MkdirAll("./data/plugin", os.ModePerm); err != nil {
-		return fmt.Errorf("failed to create plugin directory: %w", err)
-	}
-	if err := os.MkdirAll("./data/plugin-data", os.ModePerm); err != nil {
-		return fmt.Errorf("failed to create plugin storage directory: %w", err)
+	if err := preparePrivateDataDir(); err != nil {
+		return err
 	}
 
 	dbcore.SetVersionID(utils.CurrentVersion + "-" + utils.VersionHash)
@@ -36,5 +30,23 @@ func (a *App) Bootstrap() error {
 		return fmt.Errorf("failed to load settings: %w", err)
 	}
 	a.settings = settings
+	return nil
+}
+
+func preparePrivateDataDir() error {
+	if info, err := os.Lstat("./data"); err == nil && (info.Mode()&os.ModeSymlink != 0 || !info.IsDir()) {
+		return fmt.Errorf("data root must be a real private directory")
+	}
+	if err := os.MkdirAll("./data", 0700); err != nil {
+		return err
+	}
+	if err := os.Chmod("./data", 0700); err != nil {
+		return err
+	}
+	for _, path := range []string{"./data/theme", "./data/plugin", "./data/plugin-data"} {
+		if err := os.MkdirAll(path, 0700); err != nil {
+			return fmt.Errorf("create private data directory: %w", err)
+		}
+	}
 	return nil
 }

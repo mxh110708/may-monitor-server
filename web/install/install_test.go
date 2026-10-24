@@ -9,15 +9,16 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/komari-monitor/komari/internal/metricstore"
 	"github.com/komari-monitor/komari/database/models"
 	appconfig "github.com/komari-monitor/komari/internal/config"
+	"github.com/komari-monitor/komari/internal/metricstore"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
 func setupInstallRouter(t *testing.T) (*gin.Engine, *gorm.DB, *Controller) {
 	t.Helper()
+	t.Setenv("MAY_MONITOR_SETUP_TOKEN", "synthetic-setup-token-for-local-tests-only")
 	db, err := gorm.Open(sqlite.Open("file:"+filepath.ToSlash(filepath.Join(t.TempDir(), "install.db"))+"?mode=rwc"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open install database: %v", err)
@@ -43,9 +44,33 @@ func performJSON(r http.Handler, method, path string, body any) *httptest.Respon
 	encoded, _ := json.Marshal(body)
 	request := httptest.NewRequest(method, path, bytes.NewReader(encoded))
 	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-May-Setup-Token", "synthetic-setup-token-for-local-tests-only")
 	response := httptest.NewRecorder()
 	r.ServeHTTP(response, request)
 	return response
+}
+
+func TestFirstRunRequiresPrivateSetupKey(t *testing.T) {
+	r, db, _ := setupInstallRouter(t)
+	for _, key := range []string{"", "synthetic-wrong-key"} {
+		req := httptest.NewRequest(http.MethodPost, APIPath+"/complete", bytes.NewBufferString(`{}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-May-Setup-Token", key)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("unauthorized setup status=%d", w.Code)
+		}
+	}
+	var count int64
+	db.Model(&models.User{}).Count(&count)
+	if count != 0 {
+		t.Fatal("unauthorized setup created account")
+	}
+	response := performJSON(r, http.MethodPost, APIPath+"/upload/init", map[string]any{"purpose": "backup", "size": 100, "filename": "synthetic.zip"})
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("archive import default status=%d", response.Code)
+	}
 }
 
 func TestInstallRejectsInvalidInputWithoutCreatingAccount(t *testing.T) {

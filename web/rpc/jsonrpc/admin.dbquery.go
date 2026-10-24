@@ -62,6 +62,10 @@ type databaseTablesResponse struct {
 }
 
 func init() {
+	// Queries may expose credentials or mutate state through SQL functions too.
+	for _, method := range []string{"admin:dbQuery", "admin:dbExec", "admin:dbTables"} {
+		rpc.MarkSensitive(method)
+	}
 	RegisterWithGroupAndMeta("dbQuery", rpc.RoleAdmin, adminDBQuery, &rpc.MethodMeta{
 		Name:    "admin:dbQuery",
 		Summary: "Execute a SQL query against the main or metrics database",

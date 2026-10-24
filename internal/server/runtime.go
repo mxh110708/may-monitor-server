@@ -20,6 +20,7 @@ import (
 	"github.com/komari-monitor/komari/internal/metricstore"
 	"github.com/komari-monitor/komari/internal/plugin"
 	"github.com/komari-monitor/komari/internal/scheduler"
+	"github.com/komari-monitor/komari/internal/securitypolicy"
 	"github.com/komari-monitor/komari/utils/geoip"
 	logger "github.com/komari-monitor/komari/utils/log"
 	"github.com/komari-monitor/komari/utils/notifier"
@@ -80,6 +81,9 @@ func (a *App) registerReloadHandlers(cors *security.CorsController) {
 // BuildRouter constructs the normal application router and starts reloads.
 func (a *App) BuildRouter() error {
 	r := gin.New()
+	if err := security.ConfigureTrustedProxies(r); err != nil {
+		return err
+	}
 	r.Use(logger.GinLogger(), logger.GinRecovery())
 	cors := security.NewCorsController(a.settings.CorsOriginCheckEnabled, a.settings.CorsAllowedOrigins)
 	r.Use(cors.Middleware(), api.IdentityMiddleware(), api.PrivateSiteMiddleware(), noStoreAPIResponses())
@@ -93,8 +97,10 @@ func (a *App) BuildRouter() error {
 	// Plugins are loaded after the router exists so server.route can bind
 	// routes; a failed plugin only disables itself and is logged.
 	plugin.Init(r)
-	if err := plugin.LoadAll(); err != nil {
-		logger.ErrorArgs("server", "Failed to load some plugins:", err)
+	if securitypolicy.Enabled("EXTENSIONS") {
+		if err := plugin.LoadAll(); err != nil {
+			logger.ErrorArgs("server", "Failed to load some plugins:", err)
+		}
 	}
 	a.addCleanup("plugins", func(context.Context) error { return plugin.CloseAll() })
 
@@ -109,7 +115,7 @@ func (a *App) Run() error {
 	// The HTML injector runs outside the hook chain so it sees the final
 	// response: plugin hooks can still rewrite the body, then the registered
 	// head/body fragments are embedded into every text/html page.
-	a.server = &http.Server{Addr: a.listenAddr, Handler: plugin.HTMLInjectHandler(plugin.WrapHandler(a.engine))}
+	a.server = security.NewHTTPServer(a.listenAddr, plugin.HTMLInjectHandler(plugin.WrapHandler(a.engine)))
 	serverErr := make(chan error, 1)
 	logger.Infof("server", "Starting server on %s ...", a.listenAddr)
 	go func() {

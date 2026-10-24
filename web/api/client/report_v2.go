@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	logger "github.com/komari-monitor/komari/utils/log"
-	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -31,9 +31,12 @@ func readMaybeCompressedBody(r *http.Request) ([]byte, error) {
 			return nil, err
 		}
 		defer zr.Close()
-		return io.ReadAll(zr)
+		return api.ReadLimitedBody(zr)
 	}
-	return io.ReadAll(r.Body)
+	if encoding := r.Header.Get("Content-Encoding"); encoding != "" && !strings.EqualFold(encoding, "identity") {
+		return nil, errors.New("unsupported content encoding")
+	}
+	return api.ReadLimitedBody(r.Body)
 }
 
 func bindV2Params[T any](raw any, target *T) error {
@@ -133,7 +136,12 @@ func handleV2RPC(uuid string, req v2.Request, allowWait bool) v2.Response {
 func UploadV2RPC(c *gin.Context) {
 	bytesBody, err := readMaybeCompressedBody(c.Request)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, v2.Error(nil, -32700, "invalid compressed body", err.Error()))
+		status := http.StatusBadRequest
+		var limitErr *http.MaxBytesError
+		if errors.As(err, &limitErr) {
+			status = http.StatusRequestEntityTooLarge
+		}
+		c.JSON(status, v2.Error(nil, -32700, "invalid compressed body", err.Error()))
 		return
 	}
 	var req v2.Request

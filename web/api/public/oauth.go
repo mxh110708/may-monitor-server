@@ -2,7 +2,7 @@ package public
 
 import (
 	"fmt"
-	"slices"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/komari-monitor/komari/database/accounts"
@@ -21,8 +21,12 @@ func OAuth(c *gin.Context) {
 	}
 
 	authURL, state := oauth.CurrentProvider().GetAuthorizationURL(utils.GetCallbackURL(c))
+	if authURL == "" || state == "" {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "OAuth temporarily unavailable"})
+		return
+	}
 
-	c.SetCookie("oauth_state", state, 3600, "/", "", false, true)
+	setOAuthCookie(c, "oauth_state", state, 300)
 
 	c.Redirect(302, authURL)
 }
@@ -32,14 +36,12 @@ func OAuthCallback(c *gin.Context) {
 
 	// 验证state防止CSRF攻击
 	state, _ := c.Cookie("oauth_state")
-	c.SetCookie("oauth_state", "", -1, "/", "", false, true)
+	setOAuthCookie(c, "oauth_state", "", -1)
 
 	// 获取当前OAuth提供商名称
 	providerName := oauth.CurrentProvider().GetName()
 
-	// QQ 经聚合平台中转，state 可能不匹配，只校验非空；其他提供商严格校验匹配
-	skipStateMatch := slices.Contains([]string{"qq"}, providerName)
-	if state == "" || (!skipStateMatch && state != c.Query("state")) {
+	if state == "" || state != c.Query("state") {
 		c.JSON(400, gin.H{"status": "error", "error": "Invalid state"})
 		return
 	}
@@ -50,7 +52,7 @@ func OAuthCallback(c *gin.Context) {
 	}
 	oidcUser, err := oauth.CurrentProvider().OnCallback(c, state, queries, utils.GetCallbackURL(c))
 	if err != nil {
-		c.JSON(500, gin.H{"status": "error", "error": "Failed to get user info: " + err.Error()})
+		c.JSON(500, gin.H{"status": "error", "error": "OAuth authentication failed"})
 		return
 	}
 
@@ -99,4 +101,8 @@ func OAuthCallback(c *gin.Context) {
 	setSessionCookie(c, session, sessionCookieMaxAge)
 	auditlog.Log(c.ClientIP(), user.UUID, "logged in (OAuth)", "login")
 	c.Redirect(302, "/admin/dashboard")
+}
+
+func setOAuthCookie(c *gin.Context, name, value string, age int) {
+	http.SetCookie(c.Writer, &http.Cookie{Name: name, Value: value, Path: "/", MaxAge: age, HttpOnly: true, Secure: utils.GetScheme(c) == "https", SameSite: http.SameSiteLaxMode})
 }

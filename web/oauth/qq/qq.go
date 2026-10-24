@@ -24,6 +24,16 @@ func (q *QQ) GetConfiguration() factory.Configuration {
 
 func (q *QQ) GetAuthorizationURL(redirectURI string) (string, string) {
 	state := utils.GenerateRandomString(16)
+	// Preserve state in the callback URL even when an aggregation service does
+	// not support a separate state argument. Missing/mismatched state is denied.
+	callback, err := url.Parse(redirectURI)
+	if err != nil {
+		return "", ""
+	}
+	values := callback.Query()
+	values.Set("state", state)
+	callback.RawQuery = values.Encode()
+	redirectURI = callback.String()
 
 	requestURL := fmt.Sprintf(
 		"%s/connect.php?act=login&appid=%s&appkey=%s&type=%s&redirect_uri=%s",
@@ -34,13 +44,13 @@ func (q *QQ) GetAuthorizationURL(redirectURI string) (string, string) {
 		url.QueryEscape(redirectURI),
 	)
 
-	resp, err := http.Get(requestURL)
+	resp, err := (&http.Client{Timeout: 20 * time.Second}).Get(requestURL)
 	if err != nil {
 		return "", state
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return "", state
 	}
@@ -59,7 +69,9 @@ func (q *QQ) GetAuthorizationURL(redirectURI string) (string, string) {
 		return "", state
 	}
 
-	q.stateCache.Set(state, true, cache.DefaultExpiration)
+	if !factory.StoreState(q.stateCache, state) {
+		return "", ""
+	}
 	return result.URL, state
 }
 
@@ -74,7 +86,7 @@ func (q *QQ) OnCallback(ctx *gin.Context, state string, query map[string]string,
 	if q.stateCache == nil {
 		return factory.OidcCallback{}, fmt.Errorf("state cache not initialized")
 	}
-	if _, ok := q.stateCache.Get(state); !ok {
+	if !factory.ConsumeState(q.stateCache, state) {
 		return factory.OidcCallback{}, fmt.Errorf("invalid state")
 	}
 
@@ -91,9 +103,9 @@ func (q *QQ) OnCallback(ctx *gin.Context, state string, query map[string]string,
 		url.QueryEscape(code),
 	)
 
-	resp, err := http.Get(callbackURL)
+	resp, err := (&http.Client{Timeout: 20 * time.Second}).Get(callbackURL)
 	if err != nil {
-		return factory.OidcCallback{}, fmt.Errorf("failed to get user info: %v", err)
+		return factory.OidcCallback{}, fmt.Errorf("failed to contact OAuth provider")
 	}
 	defer resp.Body.Close()
 
@@ -101,7 +113,7 @@ func (q *QQ) OnCallback(ctx *gin.Context, state string, query map[string]string,
 		return factory.OidcCallback{}, fmt.Errorf("HTTP request failed with status code: %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return factory.OidcCallback{}, fmt.Errorf("failed to read response: %v", err)
 	}

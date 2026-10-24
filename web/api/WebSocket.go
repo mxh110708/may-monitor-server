@@ -48,10 +48,11 @@ func UpgradeSafeConn(c *gin.Context, options ...WebSocketUpgradeOption) (*connec
 		return nil, err
 	}
 	interceptor := connection.Interceptor()
-	if interceptor == nil {
-		return connection.NewSafeConn(unsafeConn), nil
-	}
 	sc := connection.NewSafeConn(unsafeConn)
+	sc.SetAuthorization(principalValidator(c))
+	if interceptor == nil {
+		return sc, nil
+	}
 	info := &connection.ConnInfo{
 		ID:        sc.ID,
 		Path:      c.Request.URL.Path,

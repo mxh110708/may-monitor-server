@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/komari-monitor/komari/cmd/flags"
+	"github.com/komari-monitor/komari/utils"
 
 	"github.com/spf13/cobra"
 )
@@ -18,8 +19,9 @@ func GetEnv(key, defaultValue string) string {
 }
 
 var RootCmd = &cobra.Command{
-	Use:   "Komari",
-	Short: "Komari is a simple server monitoring tool",
+	Use:     "may-monitor-server",
+	Version: utils.CurrentVersion,
+	Short:   "May Monitor server (Komari fork)",
 	Long: `Komari is a simple server monitoring tool. 
 Made by Akizon77 with love.`,
 	Run: func(cmd *cobra.Command, args []string) {
