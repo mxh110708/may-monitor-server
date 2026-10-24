@@ -23,7 +23,10 @@ require (
 	gorm.io/gorm v1.26.1
 )
 
-require go.yaml.in/yaml/v3 v3.0.5 // indirect
+require (
+	github.com/blang/semver v3.5.1+incompatible // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
+)
 
 // Misuse of ServerConfig.PublicKeyCallback may cause authorization bypass in golang.org/x/crypto #1
 // golang.org/x/crypto Vulnerable to Denial of Service (DoS) via Slow or Incomplete Key Exchange #3

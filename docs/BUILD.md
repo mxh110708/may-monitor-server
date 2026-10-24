@@ -7,7 +7,8 @@ with disabled extensions are reference material and must not be executed.
 1. Check out the exact web repository and commit recorded in `frontend.lock.json`.
 2. In that checkout, run `npm ci --ignore-scripts`, the security/onboarding
    tests and lint. Set `SOURCE_DATE_EPOCH` to the web commit timestamp and run
-   `npm run build`.
+   `npm run build`, then `npm run test:service-worker` to check the generated
+   worker against private API caching regressions.
 3. From the server checkout, run
    `go run ./tools/packfrontend <web-checkout>/dist web/public/defaultTheme/dist.tar.zst`
    and copy its `komari-theme.json` to `web/public/defaultTheme/komari-theme.json`.

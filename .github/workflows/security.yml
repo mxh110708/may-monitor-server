@@ -43,6 +43,7 @@ jobs:
           npm run test:onboarding
           npm run lint
           npm run build
+          npm run test:service-worker
       - name: Pack exactly the reviewed frontend
         run: |
           go run ./tools/packfrontend reviewed-web/dist web/public/defaultTheme/dist.tar.zst
