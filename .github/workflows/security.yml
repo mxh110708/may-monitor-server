@@ -52,6 +52,6 @@ jobs:
         run: |
           go mod verify
           go test -count=1 -timeout=10m ./...
-          go test -race -count=1 ./securityaudit ./web/security ./web/oauth/factory ./web/connection
+          go test -race -count=1 ./pkg/jsruntime ./securityaudit ./web/security ./web/oauth/factory ./web/connection
           go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
           govulncheck ./...

@@ -261,6 +261,7 @@ func TestHTTPClientRequestErrorWithoutListenerStillCloses(t *testing.T) {
 		t.Fatalf("request close did not fire after connection failure: %v", err)
 	}
 	time.Sleep(80 * time.Millisecond)
+	runtime.Close() // Join the logging loop before inspecting its bytes.Buffer.
 	if !strings.Contains(output.String(), "setTimeout callback failed") {
 		t.Fatalf("unhandled request error was not surfaced: %s", output.String())
 	}
@@ -671,6 +672,36 @@ func TestChildProcessPermissionAndExecution(t *testing.T) {
 	}
 }
 
+func TestChildProcessCloseWaitsForBothOutputStreams(t *testing.T) {
+	runtime, err := New(`
+		async function verify(command, environment) {
+			const childProcess = require("child_process");
+			for (let index = 0; index < 16; index++) {
+				const valid = await new Promise((resolve) => {
+					const child = childProcess.spawn(command, ["-test.run=^TestNodeChildProcessHelper$"], { env: environment });
+					let stdout = "", stderr = "";
+					child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
+					child.stdout.on("data", (chunk) => stdout += chunk);
+					child.stderr.on("data", (chunk) => stderr += chunk);
+					child.on("error", () => resolve(false));
+					child.on("close", (code) => resolve(code === 0 &&
+						stdout === "x".repeat(98317) && stderr === "y".repeat(65573) &&
+						child.stdout.readableEnded && child.stderr.readableEnded));
+				});
+				if (!valid) throw new Error("child close preceded complete stdout/stderr delivery at iteration " + index);
+			}
+			return true;
+		}
+	`, Options{NodeJS: true, AllowExec: true, BaseDir: t.TempDir(), Console: io.Discard, Timeout: 45 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	if err := runtime.Call("verify", os.Args[0], childHelperEnvironment("both-output")); err != nil {
+		t.Fatalf("child_process output delivery order failed: %v", err)
+	}
+}
+
 func TestChildProcessOutputLimitAndExitCode(t *testing.T) {
 	jsRuntime, err := New(`
 		function execFile(command, environment, maxBuffer) {
@@ -922,6 +953,10 @@ func TestNodeChildProcessHelper(t *testing.T) {
 		return
 	case "output":
 		_, _ = io.WriteString(os.Stdout, strings.Repeat("x", 4096))
+		os.Exit(0)
+	case "both-output":
+		_, _ = io.WriteString(os.Stdout, strings.Repeat("x", 98317))
+		_, _ = io.WriteString(os.Stderr, strings.Repeat("y", 65573))
 		os.Exit(0)
 	case "exit":
 		os.Exit(7)

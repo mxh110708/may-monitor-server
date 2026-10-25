@@ -55,7 +55,7 @@ version, without registration or synthetic reporting. Operator-provided setup
 tokens are not printed to service logs. See [the lifecycle contract](docs/DEPLOY-LIFECYCLE.zh-CN.md)
 for its disposable-system verification and production migration limits.
 
-The RC3 candidate adds an opaque operator-managed installation UUID to already
+RC3 adds an opaque operator-managed installation UUID to already
 authenticated snapshots and agent confirmation. It is an origin comparison
 label, not an authorization secret or hardware attestation. Missing identifiers
 cannot prove an origin; the paired client still validates TLS and each node's

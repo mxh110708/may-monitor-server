@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.1.0-rc.3 — 2026-10-25
+
+Drain spawned child stdout and stderr before waiting and emitting close, so fast processes do not lose their final output. Keep execution disabled unless AllowExec is explicitly enabled. Add repeated, multi-chunk stdout/stderr coverage and include the retained runtime in race checks; synchronize the test console before reading its buffer.
 
 Add an optional opaque installation identity to authenticated snapshots and agent credential confirmation. The paired Deploy workflow compares SSH ownership with the HTTPS origin and verifies advancing telemetry before marking a node ready for trial. Keep schema 1 readers compatible; unset identities cannot prove an origin. No hardware identity, administrator privilege, automatic migration or upstream update is added.
 
