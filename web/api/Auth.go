@@ -12,6 +12,7 @@ import (
 	"github.com/komari-monitor/komari/database/accounts"
 	"github.com/komari-monitor/komari/internal/config"
 	"github.com/komari-monitor/komari/pkg/rpc"
+	"github.com/komari-monitor/komari/web/integration"
 )
 
 const (
@@ -108,6 +109,12 @@ func PrivateSiteMiddleware() gin.HandlerFunc {
 		}
 
 		path := c.Request.URL.Path
+		// This exact endpoint has its own scoped, expiring credential and no
+		// public-mode fallback. Do not exempt a prefix or grant an admin role.
+		if path == integration.SnapshotPath {
+			c.Next()
+			return
+		}
 
 		// 公开路径直接放行
 		for _, p := range publicPaths {

@@ -48,31 +48,35 @@ type completeRequest struct {
 }
 
 type Controller struct {
-	db         *gorm.DB
-	active     atomic.Bool
-	mu         sync.Mutex
-	state      string
-	setupToken string
-	done       chan struct{}
+	db                 *gorm.DB
+	active             atomic.Bool
+	mu                 sync.Mutex
+	state              string
+	setupToken         string
+	setupTokenProvided bool
+	done               chan struct{}
 }
 
 func NewController(db *gorm.DB) *Controller {
 	token := os.Getenv("MAY_MONITOR_SETUP_TOKEN")
+	provided := token != ""
 	if token == "" {
 		token = utils.GenerateRandomString(32)
 	}
 	if len(token) < 32 || len(token) > 256 {
 		token = ""
 	}
-	return &Controller{db: db, state: "ready", done: make(chan struct{}), setupToken: token}
+	return &Controller{db: db, state: "ready", done: make(chan struct{}), setupToken: token, setupTokenProvided: provided}
 }
 
 func (c *Controller) Activate() {
 	c.active.Store(true)
 	// The fragment is never sent in HTTP requests/referrers. Mutating API calls
 	// require its value in a header; never expose it from a public endpoint.
-	if c.setupToken != "" {
+	if c.setupToken != "" && !c.setupTokenProvided {
 		logger.InfoArgs("install", "Private first-run initialization link: /install#setup="+url.QueryEscape(c.setupToken))
+	} else if c.setupToken != "" {
+		logger.InfoArgs("install", "First-run initialization uses the operator-supplied private token")
 	}
 }
 

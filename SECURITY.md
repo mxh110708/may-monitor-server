@@ -43,6 +43,25 @@ administrator and code execution boundary; it does not inherit approval from
 the monitoring-profile review. API keys remain full administrator credentials,
 not scoped read-only integration tokens. Do not use them for a public client.
 
+The post-rc.1 source adds an independently authenticated, disabled-by-default
+read-only metrics endpoint. It requires an operator-configured token digest,
+explicit client UUIDs and an expiration, and never promotes its bearer namespace
+to an administrator principal. See [the read-only integration contract](docs/READ-ONLY-INTEGRATION.zh-CN.md).
+
+The paired Deploy lifecycle uses dedicated service users, loopback-only server
+listeners and component-scoped consistency snapshots. Its agent credential
+confirmation endpoint returns only the authenticated agent UUID and server
+version, without registration or synthetic reporting. Operator-provided setup
+tokens are not printed to service logs. See [the lifecycle contract](docs/DEPLOY-LIFECYCLE.zh-CN.md)
+for its disposable-system verification and production migration limits.
+
+The RC3 candidate adds an opaque operator-managed installation UUID to already
+authenticated snapshots and agent confirmation. It is an origin comparison
+label, not an authorization secret or hardware attestation. Missing identifiers
+cannot prove an origin; the paired client still validates TLS and each node's
+credential scope. Copying the entire identity and dataset is an explicit
+operator change outside an uncopyable-identity guarantee.
+
 The retained JavaScript runtime is not an operating-system security boundary.
 Untrusted plugins and notification scripts must not be loaded. Optional real
 SSO providers, remote control and data migration still need separate acceptance.

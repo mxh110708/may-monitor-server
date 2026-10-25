@@ -11,6 +11,7 @@ import (
 	"github.com/komari-monitor/komari/database/clients"
 	"github.com/komari-monitor/komari/internal/config"
 	"github.com/komari-monitor/komari/pkg/rpc"
+	"github.com/komari-monitor/komari/web/integration"
 	"time"
 )
 
@@ -20,6 +21,9 @@ const principalContextKey = "principal"
 // IdentifyPrincipal 识别当前请求的调用主体。不写入任何状态,可安全多次调用。
 // 识别优先级与历史 IdentityMiddleware 一致:API Key > Session > Client Token > 匿名。
 func IdentifyPrincipal(c *gin.Context) *rpc.Principal {
+	if integration.ReservedAuthorization(c.GetHeader("Authorization")) {
+		return rpc.NewAnonymousPrincipal()
+	}
 	// 1. API Key(Authorization: Bearer <key>)
 	if isApiKeyValid(c.GetHeader("Authorization")) {
 		return rpc.NewAPIKeyPrincipal()

@@ -130,6 +130,25 @@ func GetLatestReport() map[string]*v2.Report {
 	return reportCopy
 }
 
+// GetScopedMonitoringState copies at most the explicitly requested samples.
+// Unlike a public dashboard snapshot it never scans/copies all agents or their
+// recent history. Report scalar values are immutable after insertion.
+func GetScopedMonitoringState(ids []string, now time.Time) (map[string]v2.Report, map[string]bool) {
+	mu.RLock()
+	defer mu.RUnlock()
+	reports := make(map[string]v2.Report, len(ids))
+	online := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		_, connected := connectedClients[id]
+		presence, exists := presenceOnly[id]
+		online[id] = connected || exists && presence.expire.After(now)
+		if report := latestReport[id]; report != nil {
+			reports[id] = *report
+		}
+	}
+	return reports, online
+}
+
 // RecordReport updates the latest runtime state and keeps only the short raw
 // window used by recent-status compatibility endpoints.
 func RecordReport(report v2.Report) {

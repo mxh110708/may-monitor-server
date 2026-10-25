@@ -10,6 +10,7 @@ import (
 	public_api "github.com/komari-monitor/komari/web/api/public"
 	"github.com/komari-monitor/komari/web/api/terminal"
 	"github.com/komari-monitor/komari/web/filemanager"
+	"github.com/komari-monitor/komari/web/integration"
 	"github.com/komari-monitor/komari/web/public"
 	jsonRpc "github.com/komari-monitor/komari/web/rpc/jsonrpc"
 )
@@ -38,6 +39,7 @@ func Register(r *gin.Engine) {
 
 // registerPublicRoutes 公开路由。JSON 读接口经 Bind 绑定到 public: 命名空间方法。
 func registerPublicRoutes(r *gin.Engine) {
+	r.Any(integration.SnapshotPath, integration.ReadSnapshot)
 	// 非 JSON / 特殊流程，保留 REST handler。
 	r.POST("/api/login", public_api.Login)
 	r.POST("/api/logout", public_api.Logout)
@@ -75,6 +77,7 @@ func registerAgentRoutes(r *gin.Engine) {
 	tokenAuthorized := r.Group("/api/clients", api.RequireRole(api.RoleAdmin, api.RoleClient))
 	{
 		// Agent 上报统一使用 v2 JSON-RPC。
+		tokenAuthorized.POST("/credential-check", client.CheckCredential)
 		tokenAuthorized.GET("/v2/rpc", client.WebSocketV2RPC)
 		tokenAuthorized.POST("/v2/rpc", client.UploadV2RPC)
 		// File data uses a short-lived, raw HTTP stream opened by a file RPC.

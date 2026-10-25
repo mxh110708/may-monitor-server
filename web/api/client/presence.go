@@ -23,6 +23,19 @@ var (
 	postPresenceStates = make(map[string]*postPresenceEntry)
 )
 
+// WebSocket owns its liveness directly. Retire the previous POST fallback's
+// soft lease and timer so a real close cannot remain online until that lease
+// expires, and an old expiry cannot emit an offline event for a recovered WS.
+func clearPostPresenceForWebSocket(uuid string) {
+	postPresenceMu.Lock()
+	defer postPresenceMu.Unlock()
+	if entry, exists := postPresenceStates[uuid]; exists {
+		entry.timer.Stop()
+		delete(postPresenceStates, uuid)
+		agent_runtime.SetPresence(uuid, entry.connID, false)
+	}
+}
+
 // refreshPostPresence 管理 HTTP POST 上报者的在线/离线状态。
 func refreshPostPresence(uuid string) {
 	postPresenceMu.Lock()

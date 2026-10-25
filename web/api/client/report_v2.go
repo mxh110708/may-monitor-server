@@ -57,7 +57,7 @@ func handleV2RPC(uuid string, req v2.Request, allowWait bool) v2.Response {
 		if err := bindV2Params(req.Params, &params); err != nil {
 			return v2.Error(req.ID, -32602, "invalid report params", err.Error())
 		}
-		if err := ingestReport(uuid, params.Report, true); err != nil {
+		if err := ingestReport(uuid, params.Report, allowWait); err != nil {
 			return v2.Error(req.ID, -32000, "failed to save report", err.Error())
 		}
 		return v2.Success(req.ID, gin.H{
@@ -100,7 +100,9 @@ func handleV2RPC(uuid string, req v2.Request, allowWait bool) v2.Response {
 		if err := bindV2Params(req.Params, &params); err != nil {
 			return v2.Error(req.ID, -32602, "invalid pull params", err.Error())
 		}
-		refreshPostPresence(uuid)
+		if allowWait {
+			refreshPostPresence(uuid)
+		}
 		agent_runtime.MarkV2Client(uuid)
 		timeout := 0 * time.Second
 		if allowWait {
@@ -182,6 +184,7 @@ func WebSocketV2RPC(c *gin.Context) {
 	if oldConn, exists := agent_runtime.GetConnectedClients()[uuid]; exists {
 		go oldConn.Close()
 	}
+	clearPostPresenceForWebSocket(uuid)
 	agent_runtime.SetConnectedClients(uuid, conn)
 	agent_runtime.MarkV2Client(uuid)
 	go notifierOnline(uuid, conn.ID)
