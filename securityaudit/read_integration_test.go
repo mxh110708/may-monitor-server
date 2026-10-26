@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	v2 "github.com/komari-monitor/komari/protocol/v2"
 	"github.com/komari-monitor/komari/web/agent"
 	"github.com/komari-monitor/komari/web/integration"
+	"gorm.io/gorm"
 )
 
 func readIntegrationBoundary(t *testing.T, engine *gin.Engine) {
@@ -127,5 +129,99 @@ func readIntegrationBoundary(t *testing.T, engine *gin.Engine) {
 	t.Setenv("MAY_MONITOR_READ_TOKEN_SHA256", "")
 	if request(http.MethodGet, integration.SnapshotPath, "Bearer "+token).Code != 401 {
 		t.Fatal("revoked credential accepted")
+	}
+}
+
+// A real report arrives after request authorization/database lookup begins and
+// before the runtime state is copied. The response must still classify it as
+// fresh. A database callback provides a deterministic barrier, without adding a
+// test hook or timing tolerance to the production handler.
+func readSnapshotArrivalBoundary(t *testing.T, engine *gin.Engine) {
+	for _, test := range []struct {
+		name  string
+		count int
+	}{{"single-node", 1}, {"five-nodes", 5}} {
+		t.Run(test.name, func(t *testing.T) {
+			db := dbcore.GetDBInstance()
+			ids := make([]string, test.count)
+			for i := range ids {
+				id := uuid.NewString()
+				ids[i] = id
+				if err := db.Create(&models.Client{UUID: id, Token: "synthetic-" + id, Name: "arrival-fixture"}).Error; err != nil {
+					t.Fatal(err)
+				}
+				agent.SetPresence(id, 29, true)
+				agent.RecordReport(v2.Report{UUID: id, CPU: v2.CPUReport{Usage: 2}, Ram: v2.RamReport{Used: 512, Total: 1024}, UpdatedAt: time.Now().UTC().Add(-2 * time.Second)})
+				t.Cleanup(func() {
+					agent.SetPresence(id, 29, false)
+					agent.DeleteLatestReport(id)
+					db.Delete(&models.Client{}, "uuid = ?", id)
+				})
+			}
+			token := integration.TokenPrefix + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+			digest := sha256.Sum256([]byte(token))
+			t.Setenv("MAY_MONITOR_READ_TOKEN_SHA256", hex.EncodeToString(digest[:]))
+			t.Setenv("MAY_MONITOR_READ_CLIENT_UUIDS", strings.Join(ids, ","))
+			t.Setenv("MAY_MONITOR_READ_EXPIRES_AT", time.Now().UTC().Add(time.Hour).Format(time.RFC3339))
+
+			lookupReached, published, cancelled, workerClosed := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
+			var once sync.Once
+			go func() {
+				defer close(workerClosed)
+				select {
+				case <-lookupReached:
+					agent.RecordReport(v2.Report{UUID: ids[len(ids)-1], CPU: v2.CPUReport{Usage: 3}, Ram: v2.RamReport{Used: 512, Total: 1024}, UpdatedAt: time.Now().UTC()})
+					close(published)
+				case <-cancelled:
+				}
+			}()
+			t.Cleanup(func() { close(cancelled); <-workerClosed })
+			callback := "arrival-fixture-" + ids[0]
+			if err := db.Callback().Query().After("gorm:query").Register(callback, func(query *gorm.DB) {
+				if query.Statement.Table == "clients" {
+					once.Do(func() { close(lookupReached); <-published })
+				}
+			}); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { db.Callback().Query().Remove(callback) })
+
+			request := httptest.NewRequest(http.MethodGet, integration.SnapshotPath, nil)
+			request.Header.Set("Authorization", "Bearer "+token)
+			response := httptest.NewRecorder()
+			engine.ServeHTTP(response, request)
+			if response.Code != http.StatusOK {
+				t.Fatalf("snapshot HTTP status=%d", response.Code)
+			}
+			select {
+			case <-published:
+			default:
+				t.Fatal("late report barrier was not exercised")
+			}
+			var snapshot integration.Snapshot
+			if err := json.Unmarshal(response.Body.Bytes(), &snapshot); err != nil {
+				t.Fatal(err)
+			}
+			online, fresh := 0, 0
+			minimumAge := time.Duration(1<<63 - 1)
+			for _, node := range snapshot.Nodes {
+				if node.Online {
+					online++
+				}
+				if node.ReportAt == nil || node.Metrics == nil {
+					continue
+				}
+				age := snapshot.CapturedAt.Sub(*node.ReportAt)
+				if age < minimumAge {
+					minimumAge = age
+				}
+				if node.Online && age >= 0 && age <= 15*time.Second {
+					fresh++
+				}
+			}
+			if len(snapshot.Nodes) != test.count || online != test.count || fresh != test.count {
+				t.Fatalf("nodes=%d online=%d fresh=%d expected=%d minimum_age=%s", len(snapshot.Nodes), online, fresh, test.count, minimumAge)
+			}
+		})
 	}
 }

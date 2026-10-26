@@ -57,6 +57,7 @@ func TestSecurityBoundaries(t *testing.T) {
 	host := httptest.NewServer(engine)
 	defer host.Close()
 	t.Run("scoped-read-only-integration", func(t *testing.T) { readIntegrationBoundary(t, engine) })
+	t.Run("snapshot-report-arrival-during-request", func(t *testing.T) { readSnapshotArrivalBoundary(t, engine) })
 	call := func(method, path string, body any, cookies ...*http.Cookie) (*http.Response, []byte) {
 		t.Helper()
 		var source io.Reader
