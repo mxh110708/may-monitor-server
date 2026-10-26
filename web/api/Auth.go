@@ -167,6 +167,9 @@ func hasTempAccess(c *gin.Context) bool {
 }
 
 func extractClientToken(c *gin.Context) string {
+	if token := c.GetHeader("X-May-Agent-Token"); token != "" {
+		return token
+	}
 	if token := c.Query("token"); token != "" {
 		return token
 	}

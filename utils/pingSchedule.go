@@ -46,7 +46,7 @@ func (m *PingTaskManager) Reload(pingTasks []models.PingTask) error {
 		m.tasks[interval] = tasks
 		if err := scheduler.AddContextFunc(fmt.Sprintf("ping:%d", interval), scheduler.Every(time.Duration(interval)*time.Second), false, func(ctx context.Context) {
 			for _, task := range tasks {
-				go executePingTask(ctx, task)
+				executePingTask(ctx, task)
 			}
 		}); err != nil {
 			return err
@@ -57,6 +57,7 @@ func (m *PingTaskManager) Reload(pingTasks []models.PingTask) error {
 
 // executePingTask 执行单个PingTask
 func executePingTask(ctx context.Context, task models.PingTask) {
+	revision := task.Revision()
 	for _, clientUUID := range targetPingClientUUIDs(task) {
 		select {
 		case <-ctx.Done():
@@ -66,7 +67,7 @@ func executePingTask(ctx context.Context, task models.PingTask) {
 			// Context is still active, continue.
 		}
 
-		agent_runtime.DispatchPing(clientUUID, v2.PingParams{TaskID: task.Id, Type: task.Type, Target: task.Target})
+		agent_runtime.DispatchPing(clientUUID, v2.PingParams{TaskID: task.Id, Type: task.Type, Target: task.Target, Revision: revision, TimeoutMs: 3000})
 	}
 }
 

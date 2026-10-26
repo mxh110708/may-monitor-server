@@ -12,6 +12,8 @@ import (
 	"github.com/komari-monitor/komari/internal/config"
 	"github.com/komari-monitor/komari/internal/managedconfig"
 	"github.com/komari-monitor/komari/internal/metricstore"
+	"github.com/komari-monitor/komari/internal/reviewedtheme"
+	"github.com/komari-monitor/komari/internal/securitypolicy"
 	logger "github.com/komari-monitor/komari/utils/log"
 	"github.com/komari-monitor/komari/web/public"
 )
@@ -34,10 +36,10 @@ func GetPublicInfo() (map[string]interface{}, error) {
 
 	// Apply defaults only when a key is missing.
 	if !hasKey("sitename") {
-		cst.Sitename = "Komari"
+		cst.Sitename = "May Monitor"
 	}
 	if !hasKey("description") {
-		cst.Description = "Komari Monitor, a simple server monitoring tool."
+		cst.Description = "May Monitor, a server monitoring tool based on Komari."
 	}
 	if !hasKey("theme") {
 		cst.Theme = "default"
@@ -49,15 +51,22 @@ func GetPublicInfo() (map[string]interface{}, error) {
 	// Fallback defaults if we couldn't enumerate keys.
 	if allErr != nil {
 		if cst.Sitename == "" {
-			cst.Sitename = "Komari"
+			cst.Sitename = "May Monitor"
 		}
 		if cst.Description == "" {
-			cst.Description = "Komari Monitor, a simple server monitoring tool."
+			cst.Description = "May Monitor, a server monitoring tool based on Komari."
 		}
 	}
 	retention, err := metricstore.GetRetentionSummary(context.Background())
 	if err != nil {
 		return nil, err
+	}
+	if theme := reviewedtheme.Current(); theme != nil {
+		cst.Theme = theme.Short
+	}
+	if !securitypolicy.Enabled("EXTENSIONS") {
+		cst.CustomHead = ""
+		cst.CustomBody = ""
 	}
 	db := dbcore.GetDBInstance()
 	tc := models.ThemeConfiguration{}
@@ -100,6 +109,7 @@ func GetPublicInfo() (map[string]interface{}, error) {
 		"private_site":              cst.PrivateSite,
 		"theme":                     cst.Theme,
 		"theme_settings":            tc_data,
+		"may_capabilities":          gin.H{"remote_control": securitypolicy.Enabled("REMOTE_CONTROL"), "extensions": securitypolicy.Enabled("EXTENSIONS"), "debug": securitypolicy.Enabled("DEBUG"), "reviewed_theme": reviewedtheme.Current() != nil},
 	}, nil
 }
 
@@ -111,6 +121,13 @@ func themeConfigurationItems(short string) []models.ManagedThemeConfigurationIte
 			return nil
 		}
 	} else {
+		if theme := reviewedtheme.Current(); theme != nil && theme.Short == short {
+			data, ok := theme.Read("komari-theme.json")
+			if !ok || json.Unmarshal(data, &manifest) != nil {
+				return nil
+			}
+			return managedconfig.Items(manifest.Configuration)
+		}
 		data, err := os.ReadFile(filepath.Join("./data/theme", short, "komari-theme.json"))
 		if err != nil || json.Unmarshal(data, &manifest) != nil {
 			return nil

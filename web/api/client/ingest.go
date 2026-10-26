@@ -2,12 +2,16 @@ package client
 
 import (
 	"context"
+	"errors"
+	"slices"
 	"time"
 
 	"github.com/komari-monitor/komari/database/clients"
+	"github.com/komari-monitor/komari/database/dbcore"
 	"github.com/komari-monitor/komari/database/models"
 	"github.com/komari-monitor/komari/database/tasks"
 	"github.com/komari-monitor/komari/internal/metricstore"
+	"github.com/komari-monitor/komari/internal/monitoring"
 	v2 "github.com/komari-monitor/komari/protocol/v2"
 	agent_runtime "github.com/komari-monitor/komari/web/agent"
 )
@@ -52,4 +56,30 @@ func ingestPingResult(uuid string, taskID uint, value int) error {
 		Value:  value,
 		Time:   time.Now().UTC(),
 	})
+}
+
+// Only results for the currently assigned probe can affect quality rules.
+// Legacy agents remain visible in history, but cannot claim structured evidence.
+func ingestStructuredPingResult(node string, params v2.PingResultParams) error {
+	var task models.PingTask
+	if params.TaskID == 0 || dbcore.GetDBInstance().First(&task, params.TaskID).Error != nil || !task.AppliesToClient(node) {
+		return errors.New("probe is unavailable or not assigned to this node")
+	}
+	status := params.Status
+	if status == "" {
+		status = "legacy"
+	}
+	if !slices.Contains([]string{"ok", "network_error", "timeout", "dns_error", "tls_error", "http_status", "permission_denied", "invalid_target", "busy", "legacy"}, status) || params.Value < -1 || params.Value > 10000 || params.HTTPStatus < 0 || params.HTTPStatus > 599 {
+		return errors.New("invalid probe result")
+	}
+	if status != "legacy" && (params.Revision != task.Revision() || params.PingType != task.Type || (status == "ok" && params.Value < 0) || (status != "ok" && params.Value != -1)) {
+		return errors.New("probe configuration changed or result is inconsistent")
+	}
+	if status != "permission_denied" && status != "invalid_target" && status != "busy" {
+		if err := ingestPingResult(node, params.TaskID, params.Value); err != nil {
+			return err
+		}
+	}
+	monitoring.RecordProbe(monitoring.ProbeSample{Node: node, TaskID: params.TaskID, Type: task.Type, Revision: params.Revision, Status: status, Value: params.Value, HTTPStatus: params.HTTPStatus, At: time.Now().UTC()})
+	return nil
 }

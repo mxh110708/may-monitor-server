@@ -1,6 +1,11 @@
 package models
 
-import "time"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"time"
+)
 
 type PingRecord struct {
 	Client     string    `json:"client" gorm:"type:varchar(36);not null;index"`
@@ -21,6 +26,16 @@ type PingTask struct {
 	Type      string      `json:"type" gorm:"type:varchar(12);not null;default:'icmp'"`        // icmp tcp http
 	Target    string      `json:"target" gorm:"type:varchar(255);not null"`                    // Ping 目标地址
 	Interval  int         `json:"interval" gorm:"type:int;not null;default:60"`                // 间隔时间
+}
+
+func (task PingTask) Revision() string {
+	raw, _ := json.Marshal(struct {
+		ID           uint
+		Type, Target string
+		Interval     int
+	}{task.Id, task.Type, task.Target, task.Interval})
+	hash := sha256.Sum256(raw)
+	return hex.EncodeToString(hash[:])
 }
 
 // AppliesToClient 判断当前 PingTask 是否适用于指定服务器。

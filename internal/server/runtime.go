@@ -18,6 +18,7 @@ import (
 	"github.com/komari-monitor/komari/internal/config"
 	"github.com/komari-monitor/komari/internal/lifecycle"
 	"github.com/komari-monitor/komari/internal/metricstore"
+	"github.com/komari-monitor/komari/internal/monitoring"
 	"github.com/komari-monitor/komari/internal/plugin"
 	"github.com/komari-monitor/komari/internal/scheduler"
 	"github.com/komari-monitor/komari/internal/securitypolicy"
@@ -45,6 +46,8 @@ const (
 
 // StartBackground starts scheduled work after all stores are ready.
 func (a *App) StartBackground() error {
+	controller := monitoring.Start(collectMonitoring)
+	a.addCleanup("monitoring-alerts", func(context.Context) error { controller.Stop(); return nil })
 	registerScheduledWork()
 	a.addCleanup("scheduler", func(context.Context) error {
 		scheduler.StopAll()

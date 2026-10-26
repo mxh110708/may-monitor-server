@@ -65,9 +65,17 @@ func (s *Store) Flush(ctx context.Context, now time.Time) (int, error) {
 	s.trimRawWindow(now)
 	written, err := s.flushClosedHotRollups(ctx, now)
 	if err != nil {
+		s.noteFlushFailure(now, err)
 		return 0, err
 	}
 	return written, nil
+}
+
+// The caller holds ingestMu; normal writes only pay for the zero-time branch.
+func (s *Store) noteFlushFailure(at time.Time, err error) {
+	if err != nil && at.After(s.retryFlushAt) {
+		s.retryFlushAt = at
+	}
 }
 
 func (s *Store) CompactMetric(ctx context.Context, metricName string, now time.Time) (int, error) {

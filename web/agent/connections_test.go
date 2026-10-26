@@ -49,3 +49,27 @@ func TestRecordReportKeepsLatestAndShortRecentWindow(t *testing.T) {
 		t.Fatal("deleting latest report did not clear runtime report state")
 	}
 }
+
+func TestRecentWindowHasBoundedCapacityAndReleasesExpiredReferences(t *testing.T) {
+	id := "bounded-burst"
+	t.Cleanup(func() { DeleteLatestReport(id) })
+	now := time.Now().UTC()
+	for i := 0; i < 2000; i++ {
+		RecordReport(v2.Report{UUID: id, UpdatedAt: now.Add(time.Duration(i) * time.Nanosecond), Message: "retained"})
+	}
+	mu.RLock()
+	reports := recentReports[id]
+	length, capacity := len(reports), cap(reports)
+	mu.RUnlock()
+	if length != maxRecentReports || capacity > maxRecentReports {
+		t.Fatalf("unbounded recent cache: len=%d cap=%d", length, capacity)
+	}
+	if latest := GetLatestReport()[id]; latest == nil || !latest.UpdatedAt.Equal(now.Add(1999*time.Nanosecond)) {
+		t.Fatal("burst lost latest report")
+	}
+	old := []v2.Report{{UpdatedAt: now.Add(-2 * time.Minute), Message: "expired"}, {UpdatedAt: now, Message: "current"}}
+	trimmed := reportsAfter(old, now.Add(-time.Minute))
+	if len(trimmed) != 1 || trimmed[0].Message != "current" || old[1].Message != "" {
+		t.Fatal("expired backing references retained")
+	}
+}

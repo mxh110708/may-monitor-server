@@ -105,7 +105,24 @@ func TestStaticRestrictedDoesNotServeCustomAssetOverride(t *testing.T) {
 	if err := os.MkdirAll(assetPath, 0o755); err != nil {
 		t.Fatalf("create custom theme asset directory: %v", err)
 	}
-	const assetName = "about-D4JKo971.css"
+	entries, err := os.ReadDir(filepath.Join(defaultDistCacheDir, "assets"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assetName := ""
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".css") {
+			assetName = entry.Name()
+			break
+		}
+	}
+	if assetName == "" {
+		t.Fatal("embedded frontend has no CSS asset to exercise")
+	}
+	expected, err := os.ReadFile(filepath.Join(defaultDistCacheDir, "assets", assetName))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(assetPath, assetName), []byte("custom override"), 0o644); err != nil {
 		t.Fatalf("write custom theme asset: %v", err)
 	}
@@ -134,8 +151,8 @@ func TestStaticRestrictedDoesNotServeCustomAssetOverride(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read restricted asset %s: %v", requestPath, err)
 		}
-		if string(body) == "custom override" {
-			t.Fatalf("restricted listener served a custom theme asset override for %s", requestPath)
+		if string(body) != string(expected) {
+			t.Fatalf("restricted listener did not serve the actual embedded asset for %s", requestPath)
 		}
 	}
 
@@ -148,5 +165,22 @@ func TestStaticRestrictedDoesNotServeCustomAssetOverride(t *testing.T) {
 	}
 	if strings.Contains(string(indexBody), `vite-plugin-pwa:register-sw`) {
 		t.Fatal("restricted index still registers a service worker")
+	}
+}
+
+func TestWorkerRoutesUseNetworkOnlyContract(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	Static(router.Group("/"), func(handlers ...gin.HandlerFunc) { router.NoRoute(handlers...) })
+	for _, path := range []string{"/sw.js", "/registerSW.js"} {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest("GET", path, nil))
+		if response.Code != 200 || response.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("worker route %s is not network-only", path)
+		}
+		body := response.Body.String()
+		if strings.Contains(body, "addEventListener('fetch'") || strings.Contains(body, "navigator.serviceWorker.register") {
+			t.Fatal("offline navigation or worker registration reintroduced")
+		}
 	}
 }

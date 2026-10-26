@@ -18,6 +18,7 @@ import (
 	"github.com/komari-monitor/komari/internal/config"
 	"github.com/komari-monitor/komari/internal/lifecycle"
 	"github.com/komari-monitor/komari/internal/metricstore"
+	"github.com/komari-monitor/komari/internal/monitoring"
 	"github.com/komari-monitor/komari/pkg/rpc"
 )
 
@@ -152,6 +153,12 @@ func adminEditSettings(ctx context.Context, req *rpc.JsonRpcRequest) (any, *rpc.
 		return nil, rpc.MakeError(rpc.InvalidParams, "Invalid or missing request body: "+err.Error(), nil)
 	}
 	removeRetiredLowResourceMode(cfg)
+	if _, found := cfg[monitoring.PolicyKey]; found {
+		return nil, rpc.MakeError(rpc.InvalidParams, "use admin:setMonitoring to validate and apply monitoring rules", nil)
+	}
+	if _, found := cfg[monitoring.StateKey]; found {
+		return nil, rpc.MakeError(rpc.InvalidParams, "monitoring runtime state cannot be edited", nil)
+	}
 	if err := validateMetricRollupSettingChanges(cfg); err != nil {
 		return nil, rpc.MakeError(rpc.InvalidParams, err.Error(), nil)
 	}

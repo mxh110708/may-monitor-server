@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"sort"
 
@@ -25,6 +26,13 @@ func AddPingTask(clients []string, defaultOn bool, name string, target, task_typ
 		Interval:  interval,
 	}
 	err := db.Transaction(func(tx *gorm.DB) error {
+		var count int64
+		if err := tx.Model(&models.PingTask{}).Count(&count).Error; err != nil {
+			return err
+		}
+		if count >= 128 {
+			return errors.New("probe task limit reached (128)")
+		}
 		if err := tx.Create(&task).Error; err != nil {
 			return err
 		}
@@ -57,21 +65,41 @@ func DeletePingTask(id []uint) error {
 // EditPingTask 批量更新延迟监测任务配置。
 func EditPingTask(tasks []*models.PingTask) error {
 	db := dbcore.GetDBInstance()
-	for _, task := range tasks {
-		task.Clients = normalizePingClients(task.Clients)
-		// 使用 map 显式更新，避免 GORM struct Updates 跳过 false/0/空切片等零值。
-		updates := map[string]interface{}{
-			"name":        task.Name,
-			"clients":     task.Clients,
-			"all_clients": task.DefaultOn,
-			"type":        task.Type,
-			"target":      task.Target,
-			"interval":    task.Interval,
+	err := db.Transaction(func(tx *gorm.DB) error {
+		seen := map[uint]bool{}
+		for _, task := range tasks {
+			if task == nil || task.Id == 0 || seen[task.Id] {
+				return errors.New("invalid or duplicate probe identity")
+			}
+			seen[task.Id] = true
+			var count int64
+			if err := tx.Model(&models.PingTask{}).Where("id = ?", task.Id).Count(&count).Error; err != nil {
+				return err
+			}
+			if count != 1 {
+				return gorm.ErrRecordNotFound
+			}
 		}
-		result := db.Model(&models.PingTask{}).Where("id = ?", task.Id).Updates(updates)
-		if result.RowsAffected == 0 {
-			return gorm.ErrRecordNotFound
+		for _, task := range tasks {
+			task.Clients = normalizePingClients(task.Clients)
+			// 使用 map 显式更新，避免 GORM struct Updates 跳过 false/0/空切片等零值。
+			updates := map[string]interface{}{
+				"name":        task.Name,
+				"clients":     task.Clients,
+				"all_clients": task.DefaultOn,
+				"type":        task.Type,
+				"target":      task.Target,
+				"interval":    task.Interval,
+			}
+			result := tx.Model(&models.PingTask{}).Where("id = ?", task.Id).Updates(updates)
+			if result.Error != nil {
+				return result.Error
+			}
 		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 	ReloadPingSchedule()
 	return nil

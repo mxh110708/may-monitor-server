@@ -26,6 +26,11 @@ var (
 
 const recentReportRetention = time.Minute
 
+// A normal 1-second reporter uses at most 61 entries. Keep burst headroom
+// without allowing a misconfigured reporter to grow this compatibility cache.
+// Persisted metric history is managed independently by metricstore.
+const maxRecentReports = 128
+
 func GetConnectedClients() map[string]*connection.SafeConn {
 	mu.RLock()
 	defer mu.RUnlock()
@@ -172,9 +177,22 @@ func RecordReport(report v2.Report) {
 		recentReports[report.UUID] = reports
 		return
 	}
+	if len(reports) == maxRecentReports {
+		if report.UpdatedAt.Before(reports[0].UpdatedAt) {
+			return
+		}
+		copy(reports, reports[1:])
+		clear(reports[len(reports)-1:])
+		reports = reports[:len(reports)-1]
+	}
 	insertAt := sort.Search(len(reports), func(i int) bool {
 		return reports[i].UpdatedAt.After(report.UpdatedAt)
 	})
+	if len(reports) == cap(reports) {
+		grown := make([]v2.Report, len(reports), min(maxRecentReports, max(8, cap(reports)*2)))
+		copy(grown, reports)
+		reports = grown
+	}
 	reports = append(reports, v2.Report{})
 	copy(reports[insertAt+1:], reports[insertAt:])
 	reports[insertAt] = report
@@ -198,9 +216,15 @@ func reportsAfter(reports []v2.Report, cutoff time.Time) []v2.Report {
 	for first < len(reports) && reports[first].UpdatedAt.Before(cutoff) {
 		first++
 	}
-	out := make([]v2.Report, len(reports)-first)
-	copy(out, reports[first:])
-	return out
+	if first == 0 {
+		return reports
+	}
+	remaining := copy(reports, reports[first:])
+	clear(reports[remaining:]) // release strings/GPU references from expired rows
+	if remaining == 0 {
+		return nil
+	}
+	return reports[:remaining]
 }
 
 func DeleteLatestReport(uuid string) {

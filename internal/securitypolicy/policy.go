@@ -3,6 +3,7 @@
 package securitypolicy
 
 import (
+	"github.com/komari-monitor/komari/internal/reviewedtheme"
 	"os"
 	"strings"
 )
@@ -31,6 +32,9 @@ func HTTPAllowed(method, path string) bool {
 		return Enabled("EXTENSIONS")
 	}
 	if strings.HasPrefix(path, "/api/admin/theme/") && path != "/api/admin/theme/list" {
+		if path == "/api/admin/theme/settings" && method == "POST" && reviewedtheme.Current() != nil {
+			return true
+		}
 		return Enabled("EXTENSIONS")
 	}
 	// Archives can install executable plugins/themes or replace auth state.

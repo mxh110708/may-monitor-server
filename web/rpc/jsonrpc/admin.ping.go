@@ -48,12 +48,24 @@ func adminAddPingTask(_ context.Context, req *rpc.JsonRpcRequest) (any, *rpc.Jso
 		TaskType  string   `json:"type"`
 		Interval  int      `json:"interval"`
 	}
-	req.BindParams(&params)
+	if req.BindParams(&params) != nil {
+		return nil, rpc.MakeError(rpc.InvalidParams, "invalid probe parameters", nil)
+	}
 	if params.Name == "" || params.Target == "" || params.TaskType == "" || params.Interval == 0 {
 		return nil, rpc.MakeError(rpc.InvalidParams, "name, target, type and interval are required", nil)
 	}
 	if !params.DefaultOn && len(params.Clients) == 0 {
 		return nil, rpc.MakeError(rpc.InvalidParams, "clients is required when default_on is false", nil)
+	}
+	if err := models.ValidatePingTask(models.PingTask{Name: params.Name, Target: params.Target, Type: params.TaskType, Interval: params.Interval, Clients: params.Clients, DefaultOn: params.DefaultOn}); err != nil {
+		return nil, rpc.MakeError(rpc.InvalidParams, err.Error(), nil)
+	}
+	current, err := tasks.GetAllPingTasks()
+	if err != nil {
+		return nil, rpc.MakeError(rpc.InternalError, "probes unavailable", nil)
+	}
+	if len(current) >= 128 {
+		return nil, rpc.MakeError(rpc.InvalidParams, "probe limit reached (128)", nil)
 	}
 	taskID, err := tasks.AddPingTask(params.Clients, params.DefaultOn, params.Name, params.Target, params.TaskType, params.Interval)
 	if err != nil {
@@ -87,6 +99,9 @@ func adminEditPingTask(_ context.Context, req *rpc.JsonRpcRequest) (any, *rpc.Js
 	for _, task := range params.Tasks {
 		if task == nil {
 			return nil, rpc.MakeError(rpc.InvalidParams, "Invalid request data", nil)
+		}
+		if err := models.ValidatePingTask(*task); err != nil {
+			return nil, rpc.MakeError(rpc.InvalidParams, err.Error(), nil)
 		}
 	}
 	if err := tasks.EditPingTask(params.Tasks); err != nil {

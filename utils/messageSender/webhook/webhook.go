@@ -23,7 +23,7 @@ func (w *WebhookSender) Unload() error {
 	return nil
 }
 
-func (w *WebhookSender) Send(_ context.Context, notification messageSender.Notification, config map[string]any) error {
+func (w *WebhookSender) Send(ctx context.Context, notification messageSender.Notification, config map[string]any) error {
 	var addition Addition
 	if err := messageSender.DecodeConfiguration(config, &addition); err != nil {
 		return err
@@ -38,6 +38,7 @@ func (w *WebhookSender) Send(_ context.Context, notification messageSender.Notif
 	}
 
 	client := outboundhttp.NewClient(30 * time.Second)
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
 	var req *http.Request
 	var err error
@@ -53,6 +54,10 @@ func (w *WebhookSender) Send(_ context.Context, notification messageSender.Notif
 
 	if err != nil {
 		return fmt.Errorf("failed to create request: %v", err)
+	}
+	req = req.WithContext(ctx)
+	if notification.EventID != "" {
+		req.Header.Set("X-May-Event-ID", notification.EventID)
 	}
 
 	// 解析并设置自定义头部
@@ -77,7 +82,7 @@ func (w *WebhookSender) Send(_ context.Context, notification messageSender.Notif
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("webhook request failed with status %d: %s", resp.StatusCode, string(body))
 	}
 

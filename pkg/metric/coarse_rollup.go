@@ -353,7 +353,9 @@ func (s *Store) FlushCoarse(ctx context.Context, now time.Time) (int, error) {
 	defer s.retentionMu.RUnlock()
 	s.ingestMu.Lock()
 	defer s.ingestMu.Unlock()
-	return s.flushClosedCoarseRollups(ctx, now)
+	written, err := s.flushClosedCoarseRollups(ctx, now)
+	s.noteFlushFailure(now, err)
+	return written, err
 }
 
 func (s *Store) metricRollupPolicyTx(ctx context.Context, metricName string, tx *sql.Tx) (RollupPolicy, error) {

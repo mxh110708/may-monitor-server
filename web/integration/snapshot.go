@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/komari-monitor/komari/database/dbcore"
 	"github.com/komari-monitor/komari/database/models"
+	"github.com/komari-monitor/komari/internal/monitoring"
 	"github.com/komari-monitor/komari/utils"
 	"github.com/komari-monitor/komari/web/agent"
 )
@@ -42,18 +43,20 @@ type Metrics struct {
 }
 
 type Node struct {
-	UUID     string     `json:"uuid"`
-	Online   bool       `json:"online"`
-	ReportAt *time.Time `json:"report_at"`
-	Metrics  *Metrics   `json:"metrics"`
+	UUID     string             `json:"uuid"`
+	Online   bool               `json:"online"`
+	ReportAt *time.Time         `json:"report_at"`
+	Metrics  *Metrics           `json:"metrics"`
+	Alerts   *monitoring.Counts `json:"alerts,omitempty"`
 }
 
 type Snapshot struct {
-	SchemaVersion    int       `json:"schema_version"`
-	ServerVersion    string    `json:"server_version"`
-	ServerInstanceID string    `json:"server_instance_id,omitempty"`
-	CapturedAt       time.Time `json:"captured_at"`
-	Nodes            []Node    `json:"nodes"`
+	SchemaVersion       int        `json:"schema_version"`
+	ServerVersion       string     `json:"server_version"`
+	ServerInstanceID    string     `json:"server_instance_id,omitempty"`
+	CapturedAt          time.Time  `json:"captured_at"`
+	Nodes               []Node     `json:"nodes"`
+	CredentialExpiresAt *time.Time `json:"credential_expires_at,omitempty"`
 }
 
 // authorize fails closed unless all three settings are present and valid.
@@ -129,12 +132,19 @@ func ReadSnapshot(c *gin.Context) {
 		exists[row.UUID] = true
 	}
 	reports, online := agent.GetScopedMonitoringState(ids, now)
+	alertCounts := monitoring.ScopedCounts(ids)
 	snapshot := Snapshot{SchemaVersion: 1, ServerVersion: utils.CurrentVersion, ServerInstanceID: utils.MonitorInstanceID(), CapturedAt: now, Nodes: make([]Node, 0, len(registered))}
+	if expires, err := time.Parse(time.RFC3339, os.Getenv("MAY_MONITOR_READ_EXPIRES_AT")); err == nil {
+		snapshot.CredentialExpiresAt = &expires
+	}
 	for _, id := range ids {
 		if !exists[id] {
 			continue
 		}
 		node := Node{UUID: id, Online: online[id]}
+		if counts, found := alertCounts[id]; found {
+			node.Alerts = &counts
+		}
 		if report, found := reports[id]; found && !report.UpdatedAt.IsZero() {
 			at := report.UpdatedAt.UTC()
 			node.ReportAt = &at
@@ -145,5 +155,9 @@ func ReadSnapshot(c *gin.Context) {
 		}
 		snapshot.Nodes = append(snapshot.Nodes, node)
 	}
+	// Reports can arrive while this response is assembled. Stamp the completed
+	// snapshot after copying them so a new report cannot appear newer merely
+	// because it landed between request start and the scoped state read.
+	snapshot.CapturedAt = time.Now().UTC()
 	c.JSON(http.StatusOK, snapshot)
 }

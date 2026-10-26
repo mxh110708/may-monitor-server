@@ -144,6 +144,9 @@ type PingResultParams struct {
 	PingType   string    `json:"ping_type"`
 	Value      int       `json:"value"`
 	FinishedAt time.Time `json:"finished_at"`
+	Status     string    `json:"status,omitempty"`
+	Revision   string    `json:"revision,omitempty"`
+	HTTPStatus int       `json:"http_status,omitempty"`
 }
 
 type TaskResultParams struct {
@@ -165,9 +168,11 @@ type ExecParams struct {
 }
 
 type PingParams struct {
-	TaskID uint   `json:"ping_task_id"`
-	Type   string `json:"ping_type"`
-	Target string `json:"ping_target"`
+	TaskID    uint   `json:"ping_task_id"`
+	Type      string `json:"ping_type"`
+	Target    string `json:"ping_target"`
+	Revision  string `json:"revision,omitempty"`
+	TimeoutMs int    `json:"timeout_ms,omitempty"`
 }
 
 type MessageParams struct {

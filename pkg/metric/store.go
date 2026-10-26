@@ -60,6 +60,9 @@ type Store struct {
 	// ingestMu keeps the exact-sample upsert and its hot-rollup update atomic
 	// with respect to other writers.
 	ingestMu sync.Mutex
+	// Protected by ingestMu. After a persistence failure, retry the retained
+	// buckets before accepting more samples, rather than growing a shadow queue.
+	retryFlushAt time.Time
 	// rollupViewMu keeps persisted and hot rollups as one queryable view while
 	// closed buckets move into the database or replace an earlier summary.
 	rollupViewMu sync.RWMutex
@@ -946,11 +949,27 @@ func (s *Store) WriteBatch(ctx context.Context, points []Point) error {
 	if err != nil {
 		return err
 	}
+	now := time.Now().UTC()
+	if !s.retryFlushAt.IsZero() {
+		retryAt := now
+		if s.retryFlushAt.After(retryAt) {
+			retryAt = s.retryFlushAt
+		}
+		if _, err := s.flushClosedHotRollups(ctx, retryAt); err != nil {
+			return err
+		}
+		if _, err := s.flushClosedCoarseRollups(ctx, retryAt); err != nil {
+			return err
+		}
+		s.retryFlushAt = time.Time{}
+	}
 	rebuild, err := s.writeRawPoints(ctx, prepared)
 	if err != nil {
 		return err
 	}
-	return s.writePreparedHotRollups(ctx, prepared, time.Now().UTC(), rebuild)
+	err = s.writePreparedHotRollups(ctx, prepared, now, rebuild)
+	s.noteFlushFailure(now, err)
+	return err
 }
 
 // filterDisabledMetricPoints rejects points without a definition and drops

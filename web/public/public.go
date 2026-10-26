@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/komari-monitor/komari/internal/config"
+	"github.com/komari-monitor/komari/internal/reviewedtheme"
 	"github.com/komari-monitor/komari/internal/securitypolicy"
 )
 
@@ -22,6 +23,9 @@ var PublicFS embed.FS
 
 //go:embed defaultTheme/dist.tar.zst
 var embeddedDistArchive []byte
+
+//go:embed network-sw.js
+var networkWorker []byte
 
 // 常量定义
 const (
@@ -128,6 +132,14 @@ func StaticRestricted(r *gin.RouterGroup, noRoute func(handlers ...gin.HandlerFu
 }
 
 func static(r *gin.RouterGroup, noRoute func(handlers ...gin.HandlerFunc), forceDefaultTheme bool) {
+	r.GET("/registerSW.js", func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store")
+		c.Data(http.StatusOK, "application/javascript", []byte("// Monitoring uses network data; no new offline worker is registered.\n"))
+	})
+	r.GET("/sw.js", func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store")
+		c.Data(http.StatusOK, "application/javascript", networkWorker)
+	})
 	// 初始化嵌入式文件系统，指向 defaultTheme 根目录。
 	defaultThemeFS, err := fs.Sub(PublicFS, "defaultTheme")
 	if err != nil {
@@ -147,6 +159,9 @@ func static(r *gin.RouterGroup, noRoute func(handlers ...gin.HandlerFunc), force
 			cfg[config.CustomBodyKey] = ""
 			cfg[config.ThemeKey] = DefaultTheme
 		}
+		if theme := reviewedtheme.Current(); theme != nil {
+			cfg[config.ThemeKey] = theme.Short
+		}
 		return cfg
 	}
 
@@ -162,19 +177,43 @@ func static(r *gin.RouterGroup, noRoute func(handlers ...gin.HandlerFunc), force
 			if strings.Contains(themeID, "..") || strings.Contains(themeID, "/") || strings.Contains(themeID, "\\") {
 				return nil, "", false
 			}
-
-			themeBasePath := filepath.Join(DataDir, ThemesDir, themeID)
-
-			if !isSafePath(themeBasePath, cleanPath) {
+			if theme := reviewedtheme.Current(); theme != nil && themeID == theme.Short {
+				// Embedded admin asset names take precedence over public-theme
+				// assets. The selected public index is the sole intentional exception.
+				if strings.HasPrefix(cleanPath, "dist/") && cleanPath != "dist/index.html" {
+					builtin := filepath.Join(defaultDistCacheDir, filepath.FromSlash(strings.TrimPrefix(cleanPath, "dist/")))
+					if isSafePath(defaultDistCacheDir, strings.TrimPrefix(cleanPath, "dist/")) {
+						if content, err := os.ReadFile(builtin); err == nil {
+							return content, mime.TypeByExtension(filepath.Ext(cleanPath)), true
+						}
+					}
+				}
+				content, ok := theme.Read(filepath.ToSlash(cleanPath))
+				if ok {
+					return content, mime.TypeByExtension(filepath.Ext(cleanPath)), true
+				}
+				// A missing public asset can still be a built-in admin asset.
+				if cleanPath == "dist/index.html" {
+					return nil, "", false
+				}
+			} else if !securitypolicy.Enabled("EXTENSIONS") {
 				return nil, "", false
 			}
 
-			localPath := filepath.Join(themeBasePath, cleanPath)
-			// 检查文件是否存在且不是目录
-			if info, err := os.Stat(localPath); err == nil && !info.IsDir() {
-				content, err := os.ReadFile(localPath)
-				if err == nil {
-					return content, mime.TypeByExtension(filepath.Ext(localPath)), true
+			if securitypolicy.Enabled("EXTENSIONS") {
+				themeBasePath := filepath.Join(DataDir, ThemesDir, themeID)
+
+				if !isSafePath(themeBasePath, cleanPath) {
+					return nil, "", false
+				}
+
+				localPath := filepath.Join(themeBasePath, cleanPath)
+				// 检查文件是否存在且不是目录
+				if info, err := os.Stat(localPath); err == nil && !info.IsDir() {
+					content, err := os.ReadFile(localPath)
+					if err == nil {
+						return content, mime.TypeByExtension(filepath.Ext(localPath)), true
+					}
 				}
 			}
 			// 本地文件不存在，或读取失败 -> 继续向下回退
@@ -240,6 +279,7 @@ func static(r *gin.RouterGroup, noRoute func(handlers ...gin.HandlerFunc), force
 		// 执行 HTML 内容替换
 		replacer := strings.NewReplacer(
 			"<title>Komari Monitor</title>", "<title>"+html.EscapeString(cfg[config.SitenameKey].(string))+"</title>",
+			"<title>May Monitor</title>", "<title>"+html.EscapeString(cfg[config.SitenameKey].(string))+"</title>",
 			"A simple server monitor tool.", html.EscapeString(cfg[config.DescriptionKey].(string)),
 			"</head>", cfg[config.CustomHeadKey].(string)+"</head>",
 			"</body>", cfg[config.CustomBodyKey].(string)+"</body>",
@@ -358,6 +398,10 @@ func static(r *gin.RouterGroup, noRoute func(handlers ...gin.HandlerFunc), force
 		}
 
 		// 如果资源不存在，且路径包含扩展名 (如 .js, .css, .png)，则返回 404
+		if filepath.Ext(reqPath) != "" && reqPath != "/index.html" {
+			c.Status(http.StatusNotFound)
+			return
+		}
 		// 避免将 index.html 作为 js 文件返回导致 "Failed to fetch dynamically imported module"
 		//ext := filepath.Ext(reqPath)
 		//if ext != "" && ext != ".html" {

@@ -19,6 +19,7 @@ import (
 
 // Notification is the message passed to a notification channel.
 type Notification struct {
+	EventID string              `json:"event_id,omitempty"`
 	Event   models.EventMessage `json:"event"`
 	Title   string              `json:"title"`
 	Message string              `json:"message"`

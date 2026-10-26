@@ -16,6 +16,8 @@ import (
 	"github.com/komari-monitor/komari/database/dbcore"
 	"github.com/komari-monitor/komari/database/models"
 	"github.com/komari-monitor/komari/internal/config"
+	"github.com/komari-monitor/komari/internal/reviewedtheme"
+	"github.com/komari-monitor/komari/internal/securitypolicy"
 	"github.com/komari-monitor/komari/web/api"
 	"github.com/komari-monitor/komari/web/public"
 )
@@ -44,6 +46,14 @@ func ListThemes(c *gin.Context) {
 	}
 
 	var themes []models.Theme
+	if reviewed := reviewedtheme.Current(); reviewed != nil {
+		if raw, ok := reviewed.Read("komari-theme.json"); ok {
+			var theme models.Theme
+			if json.Unmarshal(raw, &theme) == nil {
+				themes = append(themes, theme)
+			}
+		}
+	}
 	defaultTheme, err := public.PublicFS.ReadFile("defaultTheme/komari-theme.json")
 	if err == nil {
 		dt := models.Theme{}
@@ -740,6 +750,13 @@ func ImportTheme(c *gin.Context) {
 
 func UpdateThemeSettings(c *gin.Context) {
 	theme := c.Query("theme")
+	if !securitypolicy.Enabled("EXTENSIONS") {
+		reviewed := reviewedtheme.Current()
+		if reviewed == nil || theme != reviewed.Short {
+			api.RespondError(c, http.StatusForbidden, "only the operator-reviewed theme can be configured")
+			return
+		}
+	}
 	if theme == "" {
 		api.RespondError(c, http.StatusBadRequest, "主题名称不能为空")
 		return
