@@ -6,4 +6,4 @@ After the completed fresh May cutover, retire the fixed-salt Komari password fal
 
 The snapshot arrival-boundary regression reproduces the former negative-age failure against the old ordering and verifies capture after report assembly. The original frozen 24-hour observation still contains its one historical NeedsReview point; it is not rewritten as a zero-anomaly run. The new release does not claim another 24-hour test or measured resource improvement over RC6.
 
-Publish with paired Agent 0.1.0-rc.4, Web 0.1.0-rc.3 and May Status 2.2.2-may.15. Publishing does not upgrade production. Preserve the source licenses and the documented non-reachable OpenPGP dependency advisory; a module advisory is not a proven reachable issue in this monitoring profile.
+Publish with paired Agent 0.1.0-rc.4, Web 0.1.0-rc.3 and May Status 2.2.2-may.16. Publishing does not upgrade production. Preserve the source licenses and the documented non-reachable OpenPGP dependency advisory; a module advisory is not a proven reachable issue in this monitoring profile.
