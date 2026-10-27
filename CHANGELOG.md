@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-rc.7 — 2026-10-27
+
+Publish the reviewed M4–M9 monitoring, maintenance, alerts and pinned-theme work with the exact May Web 0.1.0-rc.3 source lock. Retire completed Komari password/configuration/timestamp/history import paths and the old upgrade-notice RPC. Keep current May schema upgrades, backup/recovery and identity boundaries. Reject unsupported pre-May tables before AutoMigrate, and preserve the snapshot capture-order regression and its evidence limits. See RELEASE-0.1.0-rc.7.md.
+
 ## 0.1.0-rc.3 — 2026-10-25
 
 Drain spawned child stdout and stderr before waiting and emitting close, so fast processes do not lose their final output. Keep execution disabled unless AllowExec is explicitly enabled. Add repeated, multi-chunk stdout/stderr coverage and include the retained runtime in race checks; synchronize the test console before reading its buffer.

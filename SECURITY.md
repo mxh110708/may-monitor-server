@@ -11,7 +11,8 @@ The workspace report records exact evidence, upstream commits and limitations.
 - JSON and decompressed WebSocket/body messages are limited to 4 MiB; RPC
   batches to 100 calls. File streaming uses separate authenticated limits.
 - Passwords use randomly salted bcrypt over SHA-256 prehashed password input,
-  work factor 12. Legacy fixed-salt hashes are upgraded after successful login.
+  work factor 12. Retired fixed-salt hashes are rejected without rewriting the
+  account; the normal administrator password-reset procedure remains available.
 - Login attempts, concurrent password verification and OAuth state storage are
   bounded. Forwarded IP headers are untrusted unless the operator configures
   `MAY_MONITOR_TRUSTED_PROXIES` with actual proxy addresses/CIDRs.
