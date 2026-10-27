@@ -13,7 +13,7 @@ import (
 
 func init() {
 	var configPath, statePath string
-	command := &cobra.Command{Use: "watchdog", Short: "Independent read-only Server availability check (loopback receiver only)", RunE: func(cmd *cobra.Command, args []string) error {
+	command := &cobra.Command{Use: "watchdog", Short: "Independent read-only Server availability check with optional email delivery", RunE: func(cmd *cobra.Command, args []string) error {
 		info, err := os.Stat(configPath)
 		if err != nil || !info.Mode().IsRegular() || info.Size() > 8192 {
 			return errors.New("watchdog configuration is unavailable")

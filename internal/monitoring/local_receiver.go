@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// M6 is authorized only for a local receiver. Enforce a literal loopback IP
+// Local HTTP delivery is restricted to loopback. Enforce a literal loopback IP
 // twice: configuration validation and the actual connection; no DNS or proxy.
 func ValidateLocalReceiver(value string) error {
 	parsed, err := url.Parse(value)

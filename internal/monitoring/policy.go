@@ -35,6 +35,7 @@ type Rule struct {
 }
 
 type Policy struct {
+	Delivery      string `json:"delivery,omitempty"`
 	LocalReceiver string `json:"local_receiver"`
 	Schema        int    `json:"schema"`
 	Enabled       bool   `json:"enabled"`
@@ -42,6 +43,9 @@ type Policy struct {
 }
 
 func Validate(policy Policy, now time.Time) error {
+	if policy.Delivery != "" && policy.Delivery != "local" && policy.Delivery != "email" && policy.Delivery != "none" {
+		return errors.New("unsupported monitoring delivery channel")
+	}
 	if policy.LocalReceiver != "" {
 		if err := ValidateLocalReceiver(policy.LocalReceiver); err != nil {
 			return err

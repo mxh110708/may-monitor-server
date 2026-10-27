@@ -69,6 +69,13 @@ SSO providers, remote control and data migration still need separate acceptance.
 
 ## Builds and upstream changes
 
+Monitoring email delivery is an explicit, separate channel. Its private SMTP
+file is not an administrator setting or read-only API response. Only verified
+TLS on ports 465/587 with authentication is supported; public DNS results are
+pinned for dialing and private/loopback destinations are rejected. Delivery
+has a ten-second bound and reuses the bounded event/retry queue. Local HTTP
+receivers remain loopback-only. See [email operations](docs/EMAIL.zh-CN.md).
+
 Use Go 1.27.3 and the reviewed frontend revision/lockfile. The manual security
 workflow accepts a full commit ID from the owned May frontend repository and
 uses pinned official Actions. It does not publish or deploy. Historical upstream

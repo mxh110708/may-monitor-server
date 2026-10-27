@@ -13,7 +13,7 @@ import (
 
 func init() {
 	RegisterWithGroupAndMeta("getMonitoring", rpc.RoleAdmin, adminGetMonitoring, &rpc.MethodMeta{Summary: "Read bounded monitoring rule states and delivery history"})
-	RegisterWithGroupAndMeta("setMonitoring", rpc.RoleAdmin, adminSetMonitoring, &rpc.MethodMeta{Summary: "Save monitoring rules; notification receiver is loopback only"})
+	RegisterWithGroupAndMeta("setMonitoring", rpc.RoleAdmin, adminSetMonitoring, &rpc.MethodMeta{Summary: "Save monitoring rules and select local or protected SMTP delivery"})
 	RegisterWithGroupAndMeta("getProbeStatus", rpc.RoleAdmin, adminGetProbeStatus, &rpc.MethodMeta{Summary: "Read structured evidence for one assigned probe and node"})
 }
 

@@ -19,6 +19,7 @@ import (
 )
 
 type WatchdogConfig struct {
+	Delivery         string `json:"delivery,omitempty"`
 	Endpoint         string `json:"endpoint"`
 	ServerInstanceID string `json:"server_instance_id"`
 	LocalReceiver    string `json:"local_receiver"`
@@ -53,10 +54,7 @@ func ValidateWatchdog(cfg WatchdogConfig) error {
 	if cfg.IntervalSeconds < 10 || cfg.IntervalSeconds > 300 || cfg.Confirm < 2 || cfg.Confirm > 10 || cfg.Recover < 1 || cfg.Recover > 10 {
 		return errors.New("watchdog cadence or confirmation count is out of bounds")
 	}
-	if cfg.LocalReceiver != "" {
-		return ValidateLocalReceiver(cfg.LocalReceiver)
-	}
-	return nil
+	return Validate(Policy{Schema: 1, Delivery: cfg.Delivery, LocalReceiver: cfg.LocalReceiver}, time.Now().UTC())
 }
 
 func CheckWatchdog(ctx context.Context, cfg WatchdogConfig, token string, now time.Time) (string, bool) {
@@ -116,8 +114,13 @@ func RunWatchdog(ctx context.Context, cfg WatchdogConfig, token, statePath strin
 	if !strings.HasPrefix(token, "may_read_") || len(token) != 52 || tokenError != nil || len(rawToken) != 32 || base64.RawURLEncoding.EncodeToString(rawToken) != strings.TrimPrefix(token, "may_read_") {
 		return errors.New("watchdog read token is unavailable")
 	}
+	unlock, err := lockWatchdogState(statePath)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	rule := Rule{ID: "server_liveness", Name: "May Monitor Server availability", Enabled: true, Kind: "offline", Nodes: []string{cfg.ServerInstanceID}, Confirm: cfg.Confirm, Recover: cfg.Recover, Window: 1, CooldownSeconds: 300}
-	policy := Policy{Schema: 1, Enabled: true, LocalReceiver: cfg.LocalReceiver, Rules: []Rule{rule}}
+	policy := Policy{Schema: 1, Enabled: true, Delivery: cfg.Delivery, LocalReceiver: cfg.LocalReceiver, Rules: []Rule{rule}}
 	engine := NewEngine(policy)
 	state := WatchdogState{Schema: 1, ServerInstanceID: cfg.ServerInstanceID}
 	if info, err := os.Lstat(statePath); err == nil {
@@ -168,7 +171,7 @@ func RunWatchdog(ctx context.Context, cfg WatchdogConfig, token, statePath strin
 				return err
 			}
 			call, cancel := context.WithTimeout(ctx, 10*time.Second)
-			code := SendLocalReceiver(call, cfg.LocalReceiver, item.Event)
+			code := SendNotification(call, policy, item.Event)
 			cancel()
 			engine.Complete(item.Event.ID, code, time.Now().UTC())
 			state.Engine = engine.Snapshot()

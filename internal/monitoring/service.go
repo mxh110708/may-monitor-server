@@ -112,7 +112,7 @@ func (c *Controller) configureLoops(policy Policy) {
 				// this ID if the process stops after acceptance but before acknowledgement.
 				c.save()
 				call, cancel := context.WithTimeout(ctx, 10*time.Second)
-				code := SendLocalReceiver(call, c.engine.ReceiverURL(), item.Event)
+				code := SendNotification(call, c.engine.Policy(), item.Event)
 				cancel()
 				c.engine.Complete(item.Event.ID, code, time.Now().UTC())
 				c.save()
@@ -246,6 +246,7 @@ func (c *Controller) Stop() {
 }
 
 type Status struct {
+	Email        string           `json:"email"`
 	Policy       Policy           `json:"policy"`
 	EvaluatedAt  time.Time        `json:"evaluated_at"`
 	SourceError  string           `json:"source_error,omitempty"`
@@ -274,7 +275,7 @@ func (c *Controller) Status(offset, limit int) Status {
 		}
 		return states[i].RuleID < states[j].RuleID
 	})
-	result := Status{Policy: c.engine.Policy(), Total: len(states), States: []State{}, History: snapshot.History, Pending: len(snapshot.Pending)}
+	result := Status{Policy: c.engine.Policy(), Email: EmailStatus(), Total: len(states), States: []State{}, History: snapshot.History, Pending: len(snapshot.Pending)}
 	if offset < len(states) {
 		result.States = states[offset:min(len(states), offset+limit)]
 	}
@@ -339,10 +340,4 @@ func (e *Engine) NextAttempt() *time.Time {
 		}
 	}
 	return next
-}
-
-func (e *Engine) ReceiverURL() string {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.policy.LocalReceiver
 }

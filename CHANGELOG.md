@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-rc.9 — 2026-10-27
+
+Add opt-in encrypted SMTP notifications for alerts and the independent watchdog, with private configuration, pinned public destinations, bounded sends and stable retry IDs. Keep local HTTP receivers loopback-only. Add a Linux state-file lock to reject concurrent watchdogs. Real email configuration and inbox verification remain an explicit operator step. See RELEASE-0.1.0-rc.9.md.
+
 ## 0.1.0-rc.7 — 2026-10-27
 
 Publish the reviewed M4–M9 monitoring, maintenance, alerts and pinned-theme work with the exact May Web 0.1.0-rc.3 source lock. Retire completed Komari password/configuration/timestamp/history import paths and the old upgrade-notice RPC. Keep current May schema upgrades, backup/recovery and identity boundaries. Reject unsupported pre-May tables before AutoMigrate, and preserve the snapshot capture-order regression and its evidence limits. See RELEASE-0.1.0-rc.7.md.
