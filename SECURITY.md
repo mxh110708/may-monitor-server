@@ -44,7 +44,7 @@ administrator and code execution boundary; it does not inherit approval from
 the monitoring-profile review. API keys remain full administrator credentials,
 not scoped read-only integration tokens. Do not use them for a public client.
 
-The post-rc.1 source adds an independently authenticated, disabled-by-default
+The current release includes an independently authenticated, disabled-by-default
 read-only metrics endpoint. It requires an operator-configured token digest,
 explicit client UUIDs and an expiration, and never promotes its bearer namespace
 to an administrator principal. See [the read-only integration contract](docs/READ-ONLY-INTEGRATION.zh-CN.md).
@@ -56,7 +56,7 @@ version, without registration or synthetic reporting. Operator-provided setup
 tokens are not printed to service logs. See [the lifecycle contract](docs/DEPLOY-LIFECYCLE.zh-CN.md)
 for its disposable-system verification and production migration limits.
 
-RC3 adds an opaque operator-managed installation UUID to already
+The release includes an opaque operator-managed installation UUID to already
 authenticated snapshots and agent confirmation. It is an origin comparison
 label, not an authorization secret or hardware attestation. Missing identifiers
 cannot prove an origin; the paired client still validates TLS and each node's
@@ -87,6 +87,6 @@ The known OpenPGP warning in `golang.org/x/crypto` has no fixed upstream version
 the server does not import those packages. Keep the warning visible and verify
 the import graph again after every dependency or source change.
 
-## First May prerelease
+## Review provenance and current release
 
-`v0.1.0-rc.1` packages this reviewed monitoring profile. See the [shared security review](https://github.com/mxh110708/may-monitor-server/blob/v0.1.0-rc.1/docs/SECURITY-REVIEW-2026-10-24.zh-CN.md). Release manifests pin all three source commits. No automatic installation or production migration is authorized.
+`v0.1.0-rc.1` was the first package of the reviewed profile; the current documentation baseline is stable `0.1.0`, including the later fixes recorded in release notes. The initial review is historical evidence, not a renewed audit of every later commit. See the [shared security review](https://github.com/mxh110708/may-monitor-server/blob/v0.1.0-rc.1/docs/SECURITY-REVIEW-2026-10-24.zh-CN.md). Release manifests pin all three source commits. No automatic installation or production migration is authorized.

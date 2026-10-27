@@ -1,35 +1,35 @@
-# May Deploy 配套生命周期契约
+# Deploy 配套生命周期合同
 
-监控支线 M3补充：Server RC3 源码支持 `MAY_MONITOR_INSTANCE_ID`，由受管生命周期安装／升级时生成并保存到私有环境及归属记录，常规升级、组件恢复和重启保持稳定。它不是硬件 ID 或授权令牌。已认证快照及 Agent 凭据核验返回 `server_instance_id`，供 Deploy 比对所选 SSH 实例与 HTTPS 来源；旧 Agent 可以只读核验，不需改写配置。该配套候选尚未发布。
+适用：May Monitor Server／Agent 0.1.0 与 May VPS Deploy 0.9.38。这里说明当前接口、身份和恢复合同；早期 RC 的临时系统测试保存在[文档目录](README.md)所列历史记录，不再作为「尚未发布」的安装状态。
 
-日期：2026-10-24。Server 候选 `0.1.0-rc.2` 搭配已审查 Agent／Web `0.1.0-rc.1`，尚未发布。使用独立的 May 服务与数据库，与原 Komari 并存，按用户选定节点逐步迁移。
+## 身份与凭据
 
-## 服务端新增接口
+`MAY_MONITOR_INSTANCE_ID` 由受管安装生成并保存在私有环境和归属记录；正常升级、重启、组件恢复保持稳定。它是安装来源标签，不是硬件 ID、不可复制证明或授权令牌。缺失时普通指标仍可用，但无法通过需要 UUID 的来源比对。
 
-`POST /api/clients/credential-check` 使用已有的 Agent Token 身份验证。请求 JSON 只有 `token`，不把凭据放进 URL；返回 `schema_version: 1`、该 Agent 的 `uuid` 和 `server_version`，带 `Cache-Control: no-store`。
+已经认证的快照及 Agent 凭据核验返回 `server_instance_id`。Deploy 同时核对 SSH 选定实例和 HTTPS 来源，验证证书，不接受重定向或 Cookie 作为凭据替代。
 
-该接口不创建节点、不上报指标、不修改设备信息，不返回 Token 或其他节点信息。管理员会话／API Key、独立只读凭据和未认证请求不能借此转化为 Agent 身份。Deploy 在新 Agent 安装前核对该端点；HTTPS 使用正常证书校验，不接收重定向或 Cookie，只有回环隔离测试允许 HTTP。
+`POST /api/clients/credential-check` 使用已有 Agent Token，请求 JSON 只含 `token`。返回 `schema_version: 1`、该节点 `uuid`、`server_version` 及已配置的安装身份，使用 `Cache-Control: no-store`。接口不注册节点、不上报合成指标、不修改机器信息、不返回 Token 或其他节点数据。
 
-独立只读指标接口的授权范围、期限及撤销契约见[只读接口](READ-ONLY-INTEGRATION.zh-CN.md)。两者使用各自凭据，不能互换。
+管理员、独立读取、未认证身份不能借此变成 Agent。只读指标授权见[接口合同](READ-ONLY-INTEGRATION.zh-CN.md)，不能与节点 Token 混用。
 
-## 受管资源与恢复
+## 受管对象
 
-Deploy 为 Server 和 Agent 各自建立 `may-monitor-server`／`may-monitor-agent` 无登录用户、systemd 服务、`/etc` 配置和 `/var/lib` 私有数据目录。Server 默认只监听回环，Agent 关闭远程终端和自动更新。旧 Komari、Tunnel、代理、SSH 和防火墙保持原归属。
+Server 与 Agent 使用独立无登录账户、systemd、`/etc` 配置、`/var/lib` 数据和固定 May 资产。Server 显式回环监听；Agent 关闭远程控制与自动更新。Tunnel、代理、SSH 与旧备份各有自己的归属，不自动扩大当前事务范围。
 
-程序来源为固定 May 发行附件，先验证版本、总大小、SHA-256 和归档成员。升级保留现有连接和启停状态。一致性快照在选中服务暂停期间生成；恢复只处理同机器、同角色、同事务和摘要匹配的快照，恢复前保留当前数据。
+安装和升级先核对版本、大小、SHA-256、归档全部成员与受管文件；发现链接、归属漂移、未知账号／单元或未处理事务时停止写入。初始化提供的 `MAY_MONITOR_SETUP_TOKEN` 不输出到服务日志，原始凭据只存受保护材料。
 
-控制端和远端使用事务身份核对确认丢失，不自动重放安装或升级；未知对象、文件／权限漂移、服务 drop-in、链接和身份不明账号阻止写入。账号创建确认不明时不凭同名自动删除。
+## 备份与恢复
 
-首次安装的 operator-supplied `MAY_MONITOR_SETUP_TOKEN` 不再输出到服务日志。自动生成、由运维者手动启动的安装向导仍保持既有一次性接入方式；两种来源在创建控制器时固定，避免运行时环境变化导致错误输出。
+快照按选定组件暂停写入，记录程序、配置、数据、摘要、版本、身份和原运行状态。恢复仅接受同机器、角色、事务及摘要匹配的材料，恢复前保存当前数据。未写入的升级恢复不应倒灌旧数据库覆盖新指标。
 
-## 在线状态修正
+确认丢失时先只读核对同一事务身份和当前状态，不自动重放安装／升级。恢复完成需再验服务、安装 UUID、TLS、Agent 凭据与连续新报告。凭据被撤销后恢复旧文件不能算连接恢复。
 
-WebSocket 持有真实连接状态，HTTP POST 回退持有限期租约。WebSocket 上报及拉取不再刷新 POST 租约，WebSocket 接管时停止自己的旧 POST 计时器。真实 WS 关闭后不再被遗留租约继续显示在线，也不会由旧计时器向已恢复的 WS 错发离线通知。其他节点的租约不受影响；HTTP 回退仍保留原超时机制。
+旧 Komari 专用迁移导入桥已退出当前维护流程；当前 May 备份、schema 维护和组件恢复保留。历史资产不得替换为较新源码后继续声称是原长测。
 
-## 验证与迁移边界
+## 在线与新鲜度
 
-本轮与 Deploy 一起在新建 QEMU/KVM Debian 12／13 临时磁盘上验证：实际安装与初始化、RC1→RC2 升级、RC1 Agent Token 核验和指标、独立只读查询、断线重连、一致性备份、取消回退、程序／数据库恢复和重启。旧监控替身的文件、数据和 PID 保持一致。
+WebSocket 持有真实连接状态，HTTP POST 回退持有限期租约。WS 报告不延长 POST 租约，接管时停止对应旧计时器；关闭真实 WS 后不靠旧租约继续显示在线。在线与报告新鲜度分别返回和评估，采样时刻与快照时刻必须一致解释。
 
-60 秒单节点上报和只读查询中，Agent RSS 峰值约 15–17 MiB，Server 约 40–53 MiB；这是隔离短时观测，不是生产长期性能保证或优化收益比较。Go 全回归、连接／只读接口／Agent／安装／鉴权包的竞争检测及 Deploy 核心和原生表单回归另有本地证据。
+## 验证范围
 
-旧 Komari 历史、用户和告警不自动导入；新 HTTPS 发布路径、生产长期资源、真实 SSO、所有可选扩展和生产节点迁移仍需单独验收。本轮没有安装用户应用或替换生产服务。
+本合同已有临时 Debian 12／13 的真实生命周期、对应接口／连接竞争检测及受管生产迁移记录，具体版本和缺口见[Deploy 文档](https://github.com/mxh110708/may-vps-deploy/blob/main/docs/README.md)。这些证据不自动覆盖未验收架构、上游可选扩展、所有 SSO 或新版本的长期性能；稳定 0.1.0 也未因此新增一轮 24 小时长测。

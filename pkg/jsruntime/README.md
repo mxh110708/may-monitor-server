@@ -1,5 +1,8 @@
 # jsruntime 接口与兼容性说明
 
+> 文档定位：上游保留的可选扩展 API 参考。May 默认监控范围关闭通用扩展；此页面不表示已授权加载不受信代码，也不将 JavaScript 运行时视作操作系统沙箱。当前边界见[SECURITY](../../SECURITY.md)。
+
+
 `jsruntime` 是基于 [goja](https://github.com/dop251/goja) 和
 `goja_nodejs` 构建的服务端 JavaScript 运行时。它提供 CommonJS、事件循环、
 常用 Web API，以及一组受权限控制的 Node.js 兼容模块。
@@ -1045,4 +1048,3 @@ Go 进程。当前可用于约束单次执行的机制只有 `Timeout`、HTTP bo
 3. 所有 runtime 都应 `defer runtime.Close()`，否则 listener、socket、文件和 timer 可能继续存活。
 4. 引入 npm/CommonJS 包前先核对它依赖的 Node 核心模块。纯 JavaScript 不代表能在当前兼容子集运行。
 5. 调用会抛错的方法或依赖固定值前，应把它视为“不支持”，不要把存在的方法名当成能力检测。
-
