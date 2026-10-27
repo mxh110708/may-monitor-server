@@ -53,16 +53,6 @@ func openStoreWithDefaultRetention(ctx context.Context, cfg *MetricStoreConfig, 
 	return s, nil
 }
 
-// OpenStoreForMigration opens an isolated target and uses the legacy data span
-// as the initial retention for definitions that do not exist yet. Existing
-// definitions keep their configured retention, including an explicit zero.
-func OpenStoreForMigration(ctx context.Context, cfg *MetricStoreConfig, legacyRetentionDays int) (*metric.Store, error) {
-	if legacyRetentionDays < defaultBuiltinMetricRetentionDays {
-		legacyRetentionDays = defaultBuiltinMetricRetentionDays
-	}
-	return openStoreWithDefaultRetention(ctx, cfg, legacyRetentionDays)
-}
-
 // TestConnection 使用给定配置尝试连接 metrics 数据库（不影响当前运行的 store）。
 // 仅打开连接并 Ping，不执行自动建表，连接成功后立即关闭。失败时返回可读错误。
 func TestConnection(ctx context.Context, cfg *MetricStoreConfig) error {

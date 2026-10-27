@@ -346,7 +346,7 @@ func TestSecurityBoundaries(t *testing.T) {
 			t.Fatal("same-origin POST failed")
 		}
 	})
-	t.Run("salted-passwords-and-legacy-upgrade", func(t *testing.T) {
+	t.Run("salted-passwords-reject-retired-format", func(t *testing.T) {
 		other, err := accounts.CreateAccount("synthetic-second", "Synthetic-Password-Only")
 		if err != nil {
 			t.Fatal(err)
@@ -360,13 +360,20 @@ func TestSecurityBoundaries(t *testing.T) {
 		sum := sha256.Sum256([]byte("Synthetic-Password-Only" + "06Wm4Jv1Hkxx"))
 		legacy := base64.StdEncoding.EncodeToString(sum[:])
 		db.Model(&models.User{}).Where("uuid = ?", other.UUID).Update("passwd", legacy)
-		if _, ok := accounts.CheckPassword(other.Username, "Synthetic-Password-Only"); !ok {
-			t.Fatal("legacy password failed")
+		if _, ok := accounts.CheckPassword(other.Username, "Synthetic-Password-Only"); ok {
+			t.Fatal("retired fixed-salt password format was accepted")
 		}
 		stored, _ := accounts.GetUserByUUID(other.UUID)
-		if !strings.HasPrefix(stored.Passwd, "$may-bcrypt-sha256$") {
-			t.Fatal("legacy password was not upgraded")
+		if stored.Passwd != legacy {
+			t.Fatal("rejected password was modified")
 		}
+		if err := accounts.ForceResetPassword(other.Username, "Synthetic-Reset-Only"); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := accounts.CheckPassword(other.Username, "Synthetic-Reset-Only"); !ok {
+			t.Fatal("password reset failed")
+		}
+
 	})
 	t.Run("login-works-and-throttles-bounded-failures", func(t *testing.T) {
 		resp, _ := call("POST", "/api/login", map[string]any{"username": user.Username, "password": "Synthetic-Password-Only"})

@@ -1,27 +1,19 @@
-// Package migration serves the authenticated database migration guide used by
-// both legacy monitoring imports and Metric Store structure upgrades.
+// Package migration serves the authenticated Metric Store structure upgrade guide.
 package migration
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"net/http"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/komari-monitor/komari/database/dbcore"
-	"github.com/komari-monitor/komari/internal/metricstore"
 	appconfig "github.com/komari-monitor/komari/internal/config"
-	"github.com/komari-monitor/komari/internal/migrations"
-	"github.com/komari-monitor/komari/pkg/metric"
+	"github.com/komari-monitor/komari/internal/metricstore"
 	"github.com/komari-monitor/komari/web/api"
 	publicapi "github.com/komari-monitor/komari/web/api/public"
 	jsonrpc "github.com/komari-monitor/komari/web/rpc/jsonrpc"
-	"gorm.io/gorm"
 )
 
 const (
@@ -29,31 +21,21 @@ const (
 	APIPath  = "/api/admin/database-migration"
 )
 
-const largeDatasetThreshold int64 = 300_000
 const structureProgressCeiling = 80.0
 
 type Mode string
 
 const (
-	ModeLegacyMonitoring Mode = "legacy_monitoring"
-	ModeMetricStructure  Mode = "metric_store_restructure"
+	ModeMetricStructure Mode = "metric_store_restructure"
 )
 
-// Status is the shared polling payload for both migration modes. Mode-specific
-// fields are omitted when they do not apply.
+// Status is the polling payload for a metric-store structure upgrade.
 type Status struct {
 	Mode     Mode    `json:"mode"`
 	State    string  `json:"state"`
 	Phase    string  `json:"phase"`
 	Progress float64 `json:"progress"`
 	Error    string  `json:"error,omitempty"`
-
-	Summary         *migrations.LegacyMonitoringSummary `json:"summary,omitempty"`
-	Table           string                              `json:"table,omitempty"`
-	SourceRowsDone  int64                               `json:"source_rows_done,omitempty"`
-	SourceRowsTotal int64                               `json:"source_rows_total,omitempty"`
-	WrittenPoints   int64                               `json:"written_points,omitempty"`
-	TargetDriver    string                              `json:"target_driver,omitempty"`
 
 	CurrentMetric string  `json:"current_metric,omitempty"`
 	RowsDone      int64   `json:"rows_done,omitempty"`
@@ -68,35 +50,12 @@ type Status struct {
 
 type Controller struct {
 	mode Mode
-	db   *gorm.DB
 
 	active atomic.Bool
 	mu     sync.RWMutex
 	status Status
 	done   chan struct{}
 	once   sync.Once
-}
-
-type startRequest struct {
-	Driver              string `json:"driver"`
-	DSN                 string `json:"dsn"`
-	ConfirmSQLiteRisk   bool   `json:"confirm_sqlite_risk"`
-	ConfirmLargeDataset bool   `json:"confirm_large_dataset"`
-}
-
-func NewLegacyController(db *gorm.DB, summary migrations.LegacyMonitoringSummary) *Controller {
-	return &Controller{
-		mode: ModeLegacyMonitoring,
-		db:   db,
-		status: Status{
-			Mode:            ModeLegacyMonitoring,
-			State:           "idle",
-			Phase:           "ready",
-			Summary:         &summary,
-			SourceRowsTotal: summary.MonitoringRows,
-		},
-		done: make(chan struct{}),
-	}
 }
 
 func NewStructureController() *Controller {
@@ -124,9 +83,7 @@ func (c *Controller) Register(r *gin.Engine) {
 	authorized := g.Group("", api.RequireRole(api.RoleAdmin))
 	authorized.GET("/status", c.getStatus)
 	authorized.POST("/start", c.start)
-	if c.mode == ModeMetricStructure {
-		authorized.POST("/discard", c.discard)
-	}
+	authorized.POST("/discard", c.discard)
 }
 
 func (c *Controller) requireActive(ctx *gin.Context) {
@@ -157,18 +114,10 @@ func (c *Controller) getStatus(ctx *gin.Context) {
 }
 
 func (c *Controller) start(ctx *gin.Context) {
-	if c.mode == ModeMetricStructure {
-		c.startStructure(ctx)
-		return
-	}
-	c.startLegacy(ctx)
+	c.startStructure(ctx)
 }
 
 func (c *Controller) discard(ctx *gin.Context) {
-	if c.mode != ModeMetricStructure {
-		api.RespondError(ctx, http.StatusNotFound, "history discard is unavailable for this migration")
-		return
-	}
 	c.mu.Lock()
 	if c.operationActiveLocked() || c.status.State == "completed" {
 		c.mu.Unlock()
@@ -196,52 +145,6 @@ func (c *Controller) startStructure(ctx *gin.Context) {
 	api.RespondSuccessMessage(ctx, "database migration started", gin.H{})
 }
 
-func (c *Controller) startLegacy(ctx *gin.Context) {
-	var request startRequest
-	if err := decodeJSON(ctx, &request); err != nil {
-		api.RespondError(ctx, http.StatusBadRequest, err.Error())
-		return
-	}
-	cfg, err := metricConfig(request.Driver, request.DSN)
-	if err != nil {
-		api.RespondError(ctx, http.StatusBadRequest, err.Error())
-		return
-	}
-	summary, err := migrations.InspectLegacyMonitoring(c.db)
-	if err != nil {
-		api.RespondError(ctx, http.StatusInternalServerError, "failed to inspect legacy monitoring data")
-		return
-	}
-	driver := metricstore.ResolveDriverFromConfig(cfg.Driver, cfg.DSN)
-	if driver == metric.DriverSQLite && summary.ServerCount > 5 && summary.RetentionDays > 7 && !request.ConfirmSQLiteRisk {
-		api.RespondError(ctx, http.StatusConflict, "SQLite risk confirmation is required")
-		return
-	}
-	if summary.LoadRows+summary.LatencyRows > largeDatasetThreshold && !request.ConfirmLargeDataset {
-		api.RespondError(ctx, http.StatusConflict, "large dataset confirmation is required")
-		return
-	}
-
-	c.mu.Lock()
-	if c.operationActiveLocked() || c.status.State == "completed" {
-		c.mu.Unlock()
-		api.RespondError(ctx, http.StatusConflict, "database migration is already running or completed")
-		return
-	}
-	c.status = Status{
-		Mode:            c.mode,
-		State:           "migrating",
-		Phase:           "connecting",
-		Summary:         &summary,
-		SourceRowsTotal: summary.MonitoringRows,
-		TargetDriver:    string(driver),
-	}
-	c.mu.Unlock()
-
-	go c.runLegacy(*cfg, summary.RetentionDays)
-	api.RespondSuccessMessage(ctx, "database migration started", gin.H{})
-}
-
 func (c *Controller) operationActiveLocked() bool {
 	switch c.status.State {
 	case "cleaning", "discarding", "migrating", "copying", "reclaiming":
@@ -249,116 +152,6 @@ func (c *Controller) operationActiveLocked() bool {
 	default:
 		return false
 	}
-}
-
-func (c *Controller) runLegacy(cfg metricstore.MetricStoreConfig, legacyRetentionDays int) {
-	ctx := context.Background()
-	mainBefore, err := dbcore.StorageSize()
-	if err != nil {
-		c.failTarget(err, cfg.DSN, "measuring")
-		return
-	}
-	store, err := metricstore.OpenStoreForMigration(ctx, &cfg, legacyRetentionDays)
-	if err != nil {
-		c.failTarget(err, cfg.DSN, "connecting")
-		return
-	}
-	defer store.Close()
-	targetBefore, err := store.StorageSize(ctx)
-	if err != nil {
-		c.failTarget(err, cfg.DSN, "measuring")
-		return
-	}
-
-	if err := appconfig.SetMany(map[string]any{
-		metricstore.MetricDBDriverKey: cfg.Driver,
-		metricstore.MetricDBDSNKey:    cfg.DSN,
-	}); err != nil {
-		c.failTarget(err, cfg.DSN, "saving_target")
-		return
-	}
-
-	_, err = migrations.MigrateLegacyMonitoring(ctx, c.db, store, func(progress migrations.LegacyMonitoringProgress) {
-		c.mu.Lock()
-		c.status.Phase = progress.Phase
-		c.status.Table = progress.Table
-		c.status.SourceRowsDone = progress.SourceRowsDone
-		c.status.SourceRowsTotal = progress.SourceRowsTotal
-		c.status.WrittenPoints = progress.WrittenPoints
-		if progress.SourceRowsTotal > 0 {
-			c.status.Progress = float64(progress.SourceRowsDone) / float64(progress.SourceRowsTotal) * 100
-		}
-		c.mu.Unlock()
-	})
-	if err != nil {
-		c.failTarget(err, cfg.DSN, "migrating")
-		return
-	}
-	if err := store.RebuildCoarserRollups(ctx, time.Hour); err != nil {
-		c.failTarget(err, cfg.DSN, "migrating")
-		return
-	}
-
-	c.mu.Lock()
-	c.status.Phase = "vacuuming"
-	c.status.Progress = 100
-	c.mu.Unlock()
-	if _, err := store.Compact(ctx, time.Now().UTC()); err != nil {
-		c.failTarget(err, cfg.DSN, "vacuuming")
-		return
-	}
-	if err := store.ReclaimSpace(ctx); err != nil {
-		c.failTarget(err, cfg.DSN, "vacuuming")
-		return
-	}
-
-	c.mu.Lock()
-	c.status.Phase = "finalizing"
-	c.mu.Unlock()
-	finalizePhase := "finalizing"
-	if err := migrations.CompleteLegacyMonitoringMigration(c.db, func() error {
-		finalizePhase = "vacuuming"
-		c.mu.Lock()
-		c.status.Phase = finalizePhase
-		c.mu.Unlock()
-		return dbcore.ReclaimSpace(ctx)
-	}); err != nil {
-		c.failTarget(err, cfg.DSN, finalizePhase)
-		return
-	}
-	mainAfter, err := dbcore.StorageSize()
-	if err != nil {
-		c.failTarget(err, cfg.DSN, "measuring")
-		return
-	}
-	targetAfter, err := store.StorageSize(ctx)
-	if err != nil {
-		c.failTarget(err, cfg.DSN, "measuring")
-		return
-	}
-	beforeBytes := mainBefore + targetBefore
-	afterBytes := mainAfter + targetAfter
-	savedBytes := beforeBytes - afterBytes
-	if savedBytes < 0 {
-		savedBytes = 0
-	}
-	savedPercent := 0.0
-	if beforeBytes > 0 {
-		savedPercent = float64(savedBytes) / float64(beforeBytes) * 100
-	}
-
-	c.mu.Lock()
-	c.status.State = "completed"
-	c.status.Phase = "completed"
-	c.status.Table = ""
-	c.status.Progress = 100
-	c.status.BeforeBytes = beforeBytes
-	c.status.AfterBytes = afterBytes
-	c.status.SavedBytes = savedBytes
-	c.status.SavedPercent = savedPercent
-	c.status.Error = ""
-	c.mu.Unlock()
-	c.completeLater()
 }
 
 func (c *Controller) runStructure() {
@@ -462,14 +255,6 @@ func (c *Controller) fail(message, phase string) {
 	c.mu.Unlock()
 }
 
-func (c *Controller) failTarget(err error, dsn, phase string) {
-	message := err.Error()
-	if dsn != "" {
-		message = strings.ReplaceAll(message, dsn, "[redacted]")
-	}
-	c.fail(message, phase)
-}
-
 func structureProgressPercent(progress metricstore.RestructureProgress) float64 {
 	if progress.Phase == "reclaiming" {
 		return structureProgressCeiling
@@ -488,39 +273,4 @@ func structureProgressPercent(progress metricstore.RestructureProgress) float64 
 		return structureProgressCeiling
 	}
 	return value
-}
-
-func metricConfig(requestedDriver, requestedDSN string) (*metricstore.MetricStoreConfig, error) {
-	requestedDriver = strings.ToLower(strings.TrimSpace(requestedDriver))
-	requestedDSN = strings.TrimSpace(requestedDSN)
-	if requestedDriver != string(metric.DriverSQLite) && requestedDriver != string(metric.DriverMySQL) && requestedDriver != string(metric.DriverPostgreSQL) {
-		return nil, fmt.Errorf("driver must be sqlite, mysql, or postgresql")
-	}
-	if requestedDSN == "" {
-		if requestedDriver != string(metric.DriverSQLite) {
-			return nil, fmt.Errorf("dsn is required for remote databases")
-		}
-		requestedDSN = "./data/metrics.db"
-	}
-	resolved := metricstore.ResolveDriverFromConfig(requestedDriver, requestedDSN)
-	if string(resolved) != requestedDriver {
-		return nil, fmt.Errorf("dsn does not match the selected database type")
-	}
-	cfg, err := appconfig.GetManyAs[metricstore.MetricStoreConfig]()
-	if err != nil {
-		return nil, fmt.Errorf("load metric store defaults: %w", err)
-	}
-	cfg.Driver = requestedDriver
-	cfg.DSN = requestedDSN
-	return cfg, nil
-}
-
-func decodeJSON(ctx *gin.Context, target any) error {
-	ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, 1<<20)
-	decoder := json.NewDecoder(ctx.Request.Body)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil {
-		return fmt.Errorf("invalid request body: %w", err)
-	}
-	return nil
 }

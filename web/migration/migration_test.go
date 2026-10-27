@@ -8,9 +8,8 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/komari-monitor/komari/internal/metricstore"
 	appconfig "github.com/komari-monitor/komari/internal/config"
-	"github.com/komari-monitor/komari/internal/migrations"
+	"github.com/komari-monitor/komari/internal/metricstore"
 	"github.com/komari-monitor/komari/web/api"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -31,38 +30,16 @@ func setupConfigDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-func TestMetricConfigValidatesSelectedDriverAgainstDSN(t *testing.T) {
-	setupConfigDB(t)
-
-	sqliteConfig, err := metricConfig("sqlite", "")
-	if err != nil {
-		t.Fatalf("build default SQLite config: %v", err)
-	}
-	if sqliteConfig.Driver != "sqlite" || sqliteConfig.DSN != "./data/metrics.db" {
-		t.Fatalf("unexpected default SQLite config: %#v", sqliteConfig)
-	}
-	if _, err := metricConfig("mysql", "./data/metrics.db"); err == nil {
-		t.Fatal("expected mismatched MySQL/SQLite DSN to fail")
-	}
-	postgresConfig, err := metricConfig("postgresql", "host=127.0.0.1 port=5432 user=komari password=secret dbname=komari sslmode=disable")
-	if err != nil {
-		t.Fatalf("build PostgreSQL config: %v", err)
-	}
-	if postgresConfig.Driver != "postgresql" {
-		t.Fatalf("unexpected PostgreSQL driver: %q", postgresConfig.Driver)
-	}
-}
-
 func TestRestrictedControllersRegisterUnifiedRoutes(t *testing.T) {
 	for _, test := range []struct {
 		name       string
 		controller *Controller
 		discard    bool
 	}{
-		{name: "legacy", controller: NewLegacyController(setupConfigDB(t), migrations.LegacyMonitoringSummary{})},
 		{name: "structure", controller: NewStructureController(), discard: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			setupConfigDB(t)
 			gin.SetMode(gin.TestMode)
 			r := gin.New()
 			r.Use(api.IdentityMiddleware())
@@ -100,11 +77,11 @@ func TestRestrictedControllersRegisterUnifiedRoutes(t *testing.T) {
 }
 
 func TestUnifiedAuthIncludesMode(t *testing.T) {
-	db := setupConfigDB(t)
+	setupConfigDB(t)
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(api.IdentityMiddleware())
-	controller := NewLegacyController(db, migrations.LegacyMonitoringSummary{})
+	controller := NewStructureController()
 	controller.Activate()
 	controller.Register(r)
 
@@ -120,8 +97,8 @@ func TestUnifiedAuthIncludesMode(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode GET %s response: %v", APIPath+"/auth", err)
 	}
-	if got := payload.Data["mode"]; got != string(ModeLegacyMonitoring) {
-		t.Fatalf("GET %s mode = %v, want %q", APIPath+"/auth", got, ModeLegacyMonitoring)
+	if got := payload.Data["mode"]; got != string(ModeMetricStructure) {
+		t.Fatalf("GET %s mode = %v, want %q", APIPath+"/auth", got, ModeMetricStructure)
 	}
 }
 

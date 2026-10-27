@@ -2,7 +2,6 @@ package accounts
 
 import (
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
 	"strings"
@@ -15,8 +14,6 @@ import (
 	"gorm.io/gorm"
 )
 
-const constantSalt = "06Wm4Jv1Hkxx"
-
 // CheckPassword 检查密码，正确时返回用户 UUID 和 true
 func CheckPassword(username, passwd string) (uuid string, ok bool) {
 	db := dbcore.GetDBInstance()
@@ -25,24 +22,9 @@ func CheckPassword(username, passwd string) (uuid string, ok bool) {
 	if result.Error != nil {
 		return "", false
 	}
-	if strings.HasPrefix(user.Passwd, passwordHashPrefix) {
-		if bcrypt.CompareHashAndPassword([]byte(strings.TrimPrefix(user.Passwd, passwordHashPrefix)), passwordInput(passwd)) != nil {
-			return "", false
-		}
-	} else {
-		// Upgrade old accounts only after a successful constant-time verification.
-		legacy := sha256.Sum256([]byte(passwd + constantSalt))
-		if subtle.ConstantTimeCompare([]byte(base64.StdEncoding.EncodeToString(legacy[:])), []byte(user.Passwd)) != 1 {
-			return "", false
-		}
-		encoded, err := hashPasswd(passwd)
-		if err != nil {
-			return "", false
-		}
-		updated := db.Model(&models.User{}).Where("uuid = ? AND passwd = ?", user.UUID, user.Passwd).Update("passwd", encoded)
-		if updated.Error != nil || updated.RowsAffected != 1 {
-			return "", false
-		}
+	if !strings.HasPrefix(user.Passwd, passwordHashPrefix) ||
+		bcrypt.CompareHashAndPassword([]byte(strings.TrimPrefix(user.Passwd, passwordHashPrefix)), passwordInput(passwd)) != nil {
+		return "", false
 	}
 	return user.UUID, true
 }
@@ -67,7 +49,7 @@ func ForceResetPassword(username, passwd string) error {
 const passwordHashPrefix = "$may-bcrypt-sha256$"
 
 // Prehashing avoids bcrypt's 72-byte truncation while retaining a random salt
-// and an adaptive work factor. The fixed-salt SHA256 format is read-only legacy.
+// and an adaptive work factor.
 func passwordInput(passwd string) []byte {
 	h := sha256.Sum256([]byte(passwd))
 	return []byte(base64.StdEncoding.EncodeToString(h[:]))

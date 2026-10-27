@@ -13,7 +13,6 @@ import (
 	"github.com/komari-monitor/komari/cmd/flags"
 	"github.com/komari-monitor/komari/database/models"
 	"github.com/komari-monitor/komari/internal/config"
-	"github.com/komari-monitor/komari/internal/migrations"
 	"github.com/komari-monitor/komari/internal/sqlitetune"
 	logger "github.com/komari-monitor/komari/utils/log"
 	"gorm.io/driver/sqlite"
@@ -186,13 +185,6 @@ const (
 // versionID 是当前构建的版本标识，由 SetVersionID 在 Initialize 前注入。
 var versionID string
 
-// nil means a fresh install; an empty value means an unmarked legacy install.
-var lastRunVersion *string
-
-func LastRunVersion() *string {
-	return lastRunVersion
-}
-
 // dbFileExistedAtStartup 记录本次进程启动、打开数据库之前 komari.db 是否已存在，
 // 用于区分“全新安装”与“从旧版升级（无版本标记）”。在 doInitialize 打开数据库
 // 之前采集。
@@ -231,10 +223,6 @@ func backupOnVersionUpgrade() {
 	prevVersion, readErr := config.GetAs[string](SystemVersionKey)
 	prevVersion = strings.TrimSpace(prevVersion)
 	versionRecorded := readErr == nil && prevVersion != ""
-	lastRunVersion = nil
-	if versionRecorded || dbFileExistedAtStartup {
-		lastRunVersion = &prevVersion
-	}
 
 	if versionID == "" {
 		return
@@ -438,8 +426,8 @@ func doInitialize() error {
 	default:
 		return fmt.Errorf("unsupported database type: %s (supported: %s)", flags.DatabaseType, flags.SupportedDatabaseTypes())
 	}
-	if err := migrations.Run(migrations.Context{DB: instance}); err != nil {
-		return fmt.Errorf("failed to run startup migrations: %w", err)
+	if err := validateDatabaseSchema(instance); err != nil {
+		return err
 	}
 	config.SetDb(instance)
 
@@ -452,10 +440,8 @@ func doInitialize() error {
 	// 注意：负载/GPU/ping 历史监控数据运行期全部走 metric store（默认 SQLite
 	// ./data/metrics.db，或配置的 MySQL/PostgreSQL）。旧的 records /
 	// records_long_term / gpu_records / ping_records 表不再建表、不再写入。
-	// 若升级时旧表仍存在，管理员可通过升级向导显式导入并清理。
 	// models.Record / models.PingRecord / models.GPURecord 结构体仍作为
-	// metric store 的读写 DTO 和旧表导入 DTO 保留在 models 包中。
-	// models.TrafficReportNotification 同样仅为旧数据库兼容保留，不再建表。
+	// metric store 的读写 DTO 保留在 models 包中。
 
 	err = instance.AutoMigrate(
 		&models.User{},

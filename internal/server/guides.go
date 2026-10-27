@@ -4,9 +4,8 @@ import (
 	"context"
 
 	"github.com/komari-monitor/komari/database/dbcore"
-	"github.com/komari-monitor/komari/internal/metricstore"
 	"github.com/komari-monitor/komari/database/models"
-	"github.com/komari-monitor/komari/internal/migrations"
+	"github.com/komari-monitor/komari/internal/metricstore"
 	installweb "github.com/komari-monitor/komari/web/install"
 	migrationweb "github.com/komari-monitor/komari/web/migration"
 	recoveryweb "github.com/komari-monitor/komari/web/recovery"
@@ -22,16 +21,13 @@ func (a *App) InstallRequired() (bool, error) {
 }
 
 type DatabaseMigrationRequirement struct {
-	mode    migrationweb.Mode
-	summary migrations.LegacyMonitoringSummary
+	mode migrationweb.Mode
 }
 
 func (r DatabaseMigrationRequirement) Required() bool { return r.mode != "" }
 
-// DatabaseMigrationRequired checks both supported migration inputs before the
-// normal Metric Store connection is initialized. Structure upgrades run first
-// when both inputs exist, then the startup loop detects the legacy tables on
-// its next pass.
+// DatabaseMigrationRequired checks whether the current metric store needs
+// a structure upgrade before normal service can start.
 func (a *App) DatabaseMigrationRequired() (DatabaseMigrationRequirement, error) {
 	structureRequired, err := metricstore.StructureUpgradeRequired(context.Background())
 	if err != nil {
@@ -39,13 +35,6 @@ func (a *App) DatabaseMigrationRequired() (DatabaseMigrationRequirement, error) 
 	}
 	if structureRequired {
 		return DatabaseMigrationRequirement{mode: migrationweb.ModeMetricStructure}, nil
-	}
-	legacyRequired, summary, err := migrations.LegacyMonitoringMigrationRequired(dbcore.GetDBInstance())
-	if err != nil {
-		return DatabaseMigrationRequirement{}, err
-	}
-	if legacyRequired {
-		return DatabaseMigrationRequirement{mode: migrationweb.ModeLegacyMonitoring, summary: summary}, nil
 	}
 	return DatabaseMigrationRequirement{}, nil
 }
@@ -73,16 +62,13 @@ func (a *App) RunMetricStoreRecovery(initialErr error) (bool, error) {
 	})
 }
 
-// RunDatabaseMigration serves the same authenticated guide and status model
-// for either migration input while leaving each conversion engine independent.
+// RunDatabaseMigration serves the authenticated metric-store upgrade guide.
 func (a *App) RunDatabaseMigration(requirement DatabaseMigrationRequirement) (bool, error) {
 	a.initOAuth()
 	var controller guideController
 	switch requirement.mode {
 	case migrationweb.ModeMetricStructure:
 		controller = migrationweb.NewStructureController()
-	case migrationweb.ModeLegacyMonitoring:
-		controller = migrationweb.NewLegacyController(dbcore.GetDBInstance(), requirement.summary)
 	default:
 		return false, nil
 	}
