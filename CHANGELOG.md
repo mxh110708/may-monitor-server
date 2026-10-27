@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0 — 2026-10-27
+
+Promote the accepted RC9 monitoring implementation to the first stable release, pin Web 0.1.0 and retain all security defaults. Real SMTP configuration is explicitly deferred by the operator. See RELEASE-0.1.0.md for acceptance boundaries and unchanged frozen M5 evidence.
+
 ## 0.1.0-rc.9 — 2026-10-27
 
 Add opt-in encrypted SMTP notifications for alerts and the independent watchdog, with private configuration, pinned public destinations, bounded sends and stable retry IDs. Keep local HTTP receivers loopback-only. Add a Linux state-file lock to reject concurrent watchdogs. Real email configuration and inbox verification remain an explicit operator step. See RELEASE-0.1.0-rc.9.md.
